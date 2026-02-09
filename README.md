@@ -2,47 +2,80 @@
 
 
 
-📁 Project Structure
+## Visão Geral e Objetivo de Negócio
 
-The repository is organized to clearly separate data handling, model training, API serving, monitoring, and tests, ensuring maintainability, reproducibility, and ease of deployment.
+### 1) Declaração formal do objetivo
+O objetivo deste projeto é desenvolver um modelo de Machine Learning capaz de prever o risco de um estudante apresentar defasagem escolar no próximo ano letivo (`t+1`), utilizando exclusivamente informações disponíveis até o ano corrente (`t`). A previsão tem caráter preventivo e visa apoiar decisões educacionais da Associação Passos Mágicos, priorizando alunos com maior risco.
+
+### 2) Enquadramento do problema de Machine Learning
+- Problema de `classificação binária` (risco vs. não risco).
+- Foco em `estimativa de risco futuro`, e não em explicação retrospectiva.
+- Uso de dados futuros é proibido para evitar `data leakage`.
+
+### 3) Interpretação de negócio da defasagem escolar
+No contexto da instituição, defasagem escolar representa desalinhamento entre o nível educacional esperado e o nível efetivamente observado no estudante. Valores negativos indicam maior atraso em relação ao esperado e, portanto, maior risco educacional. O interesse de negócio está em antecipar essa condição no ano seguinte para permitir intervenção preventiva.
+No dataset operacional, essa condição é representada nos campos `Defas`/`Defasagem`, usados como referência de risco educacional no recorte temporal.
+
+### 4) Contexto de uso da previsão
+- Usuários potenciais: coordenação pedagógica, equipe psicopedagógica e gestão educacional.
+- Uso principal: priorização de acompanhamento preventivo e alocação de suporte para alunos em risco.
+- Decisão de risco: falsos negativos têm custo maior que falsos positivos, pois deixam de sinalizar alunos que precisariam de intervenção.
+O modelo tem caráter preditivo e não causal, sendo utilizado exclusivamente como ferramenta de apoio à decisão humana.
+
+### 5) Implicações técnicas assumidas nesta fase
+- Horizonte temporal adotado: `t -> t+1`.
+- Tipo de problema: `classificação binária`.
+- Métrica prioritária: `Recall` (minimização de falsos negativos).
+- Saída esperada do modelo: `probabilidade de risco` (com posterior aplicação de threshold operacional).
+- Coorte temporal: pares válidos consideram estudantes com `RA` presente em anos consecutivos (`t` e `t+1`).
+
+## Análise das Bases e Dicionário
+
+A análise detalhada do dicionário de dados e das bases `2022`, `2023` e `2024` está documentada em:
+
+- [docs/analise_bases_e_dicionario.md](docs/analise_bases_e_dicionario.md)
+
+## 📁 Estrutura do Projeto
+
+O repositório é organizado para separar claramente ingestão e tratamento de dados, treinamento do modelo, disponibilização via API, monitoramento e testes, garantindo manutenibilidade, reprodutibilidade e facilidade de deploy.
 
 ```
-project-root/
+raiz-do-projeto/
 │
-├── app/                         # API layer (FastAPI)
-│   ├── main.py                  # FastAPI application entrypoint
-│   ├── routes.py                # API routes (/predict, /health, /version)
-│   ├── schemas.py               # Pydantic request/response schemas
+├── app/                         # Camada da API (FastAPI)
+│   ├── main.py                  # Ponto de entrada da aplicação FastAPI
+│   ├── routes.py                # Rotas da API (/predict, /health, /version)
+│   ├── schemas.py               # Schemas de requisição/resposta (Pydantic)
 │   └── model/
-│       ├── model.joblib         # Trained ML pipeline (serialized)
-│       ├── metadata.json        # Model metadata (metrics, threshold, version)
-│       └── reference_data.csv   # Reference dataset for drift monitoring
+│       ├── model.joblib         # Pipeline de ML treinada (serializada)
+│       ├── metadata.json        # Metadados do modelo (métricas, threshold, versão)
+│       └── reference_data.csv   # Dataset de referência para monitoramento de drift
 │
-├── src/                         # Core ML pipeline
-│   ├── data.py                  # Load XLSX, standardize columns, create t→t+1 pairs
-│   ├── preprocessing.py         # Data cleaning, encoding, scaling
-│   ├── feature_engineering.py   # Feature creation and selection
-│   ├── train.py                 # Model training and internal validation
-│   ├── evaluate.py              # Metrics, confusion matrix, threshold selection
-│   ├── drift.py                 # Drift detection with Evidently
-│   └── utils.py                 # Shared utilities (logging, configs, helpers)
+├── src/                         # Pipeline principal de ML
+│   ├── data.py                  # Carrega XLSX, padroniza colunas e cria pares t→t+1
+│   ├── preprocessing.py         # Limpeza, codificação e escalonamento de dados
+│   ├── feature_engineering.py   # Criação e seleção de atributos
+│   ├── train.py                 # Treinamento do modelo e validação interna
+│   ├── evaluate.py              # Métricas, matriz de confusão e seleção de threshold
+│   ├── drift.py                 # Detecção de drift com Evidently
+│   └── utils.py                 # Utilitários compartilhados (logging, configs, helpers)
 │
 ├── dashboards/
-│   └── streamlit_app.py         # Streamlit dashboard to visualize drift reports
+│   └── streamlit_app.py         # Dashboard Streamlit para visualizar relatórios de drift
 │
-├── tests/                       # Unit and integration tests (pytest)
-│   ├── test_data.py             # Tests for data loading and temporal pairing
-│   ├── test_preprocessing.py    # Tests for preprocessing steps
+├── tests/                       # Testes unitários e de integração (pytest)
+│   ├── test_data.py             # Testes da carga de dados e pareamento temporal
+│   ├── test_preprocessing.py    # Testes das etapas de pré-processamento
 │   ├── test_feature_engineering.py
-│   ├── test_train_smoke.py      # Smoke test for training pipeline
-│   └── test_api_predict.py      # API endpoint tests (/predict)
+│   ├── test_train_smoke.py      # Smoke test da pipeline de treinamento
+│   └── test_api_predict.py      # Testes do endpoint da API (/predict)
 │
-├── notebooks/                   # (Optional) Exploratory analysis and experiments
+├── notebooks/                   # (Opcional) Análises exploratórias e experimentos
 │
-├── Dockerfile                   # Docker image definition for API deployment
-├── requirements.txt             # Python dependencies
-├── README.md                    # Project documentation
-└── .gitignore                   # Git ignore rules
+├── Dockerfile                   # Definição da imagem Docker para deploy da API
+├── requirements.txt             # Dependências Python
+├── README.md                    # Documentação do projeto
+└── .gitignore                   # Regras de arquivos ignorados no Git
 ```
 
 ## Ambiente Local (.venv)
@@ -70,25 +103,25 @@ Este checklist foi elaborado considerando explicitamente as inconsistências rea
 Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 
 Progresso geral (barra visual):
-`[🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
+`[🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`8 de 92 tarefas concluídas (8.7%)`
+`14 de 95 tarefas concluídas (14.7%)`
 
 | Fase | Progresso |
 |---|---|
-| Fase 1 - Entendimento do Problema e Target | 0/11 |
+| Fase 1 - Entendimento do Problema e Target | 2/11 |
 | Fase 2 - Organização do Projeto e Ambiente | 2/7 |
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 0/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 0/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 0/17 |
 | Fase 6 - Artefatos, API e Deploy | 0/12 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 0/7 |
-| Fase 8 - Documentação e Entrega Final | 6/14 |
-| Total | 8/92 |
+| Fase 8 - Documentação e Entrega Final | 10/15 |
+| Total | 14/95 |
 
-### Fase 1 - Entendimento do Problema e Target [0/11]
-- [ ] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
-- [ ] Estudar o dicionário de dados e as bases de 2022, 2023 e 2024
+### Fase 1 - Entendimento do Problema e Target [2/11]
+- [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
+- [x] Estudar o dicionário de dados e as bases de 2022, 2023 e 2024
 - [ ] Padronizar a coluna de defasagem (`Defas` -> `Defasagem`)
 - [ ] Definir a formulação do target binário
 - [ ] Definir métrica primária de sucesso (`Recall`) e métricas secundárias (`PR-AUC`, `Precision`, `F1`, `ROC-AUC`) já na fase de desenho
@@ -188,10 +221,10 @@ Nota de shift temporal:
 - [ ] Implementar relatório de drift com Evidently
 - [ ] Criar aplicação Streamlit para visualização do relatório de drift
 
-### Fase 8 - Documentação e Entrega Final [6/14]
+### Fase 8 - Documentação e Entrega Final [10/15]
 - [x] Documentar visão geral do problema e objetivo
 - [ ] Documentar stack tecnológica
-- [ ] Documentar estrutura do projeto
+- [x] Documentar estrutura do projeto
 - [ ] Documentar etapas do pipeline de Machine Learning
 - [ ] Documentar limitações conhecidas do modelo e riscos assumidos
 - [ ] Documentar exemplos de chamadas à API
@@ -203,6 +236,9 @@ Nota de shift temporal:
 - [x] Adicionar barra de progresso geral visual (`[🟩⬜...]`) no checklist
 - [x] Atualizar `agents.md` com regra explícita de manutenção da barra visual e da contagem geral
 - [x] Incorporar recomendações da revisão técnica do checklist (gaps de maturidade por fase)
+- [x] Refinar redação do objetivo para "apresentar defasagem no t+1" (evita ambiguidade de transição vs estado)
+- [x] Refinar visão geral com vínculo explícito a `Defas/Defasagem` e regra de coorte por `RA`
+- [x] Adicionar menção explícita de não-causalidade do modelo na seção de contexto de uso
 
 <details>
 <summary>Notas de uso do checklist</summary>
