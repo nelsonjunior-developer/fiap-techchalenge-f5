@@ -1,0 +1,49 @@
+# Projeto
+agents.md
+dataset/
+.DS_Store
+
+# Python cache/bytecode
+__pycache__/
+*.py[codz]
+*$py.class
+
+# Ambientes virtuais
+.venv/
+venv/
+env/
+ENV/
+
+# Testes e cobertura
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+
+# Type/lint cache
+.mypy_cache/
+.ruff_cache/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Logs
+*.log
+
+# Build/distribuicao
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+
+# Segredos/config local
+.env
+.env.*
+*.env
+*.env.*
+!.env.example
+.streamlit/secrets.toml
