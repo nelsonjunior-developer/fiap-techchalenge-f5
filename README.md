@@ -98,7 +98,7 @@ A análise detalhada do dicionário de dados e das bases `2022`, `2023` e `2024`
 O repositório é organizado para separar claramente ingestão e tratamento de dados, treinamento do modelo, disponibilização via API, monitoramento e testes, garantindo manutenibilidade, reprodutibilidade e facilidade de deploy.
 
 ```
-raiz-do-projeto/
+fiap-techchalenge-f5/
 ├── README.md
 ├── .gitignore
 ├── requirements.txt
