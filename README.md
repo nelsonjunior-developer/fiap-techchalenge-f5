@@ -29,6 +29,27 @@ O modelo tem caráter preditivo e não causal, sendo utilizado exclusivamente co
 - Saída esperada do modelo: `probabilidade de risco` (com posterior aplicação de threshold operacional).
 - Coorte temporal: pares válidos consideram estudantes com `RA` presente em anos consecutivos (`t` e `t+1`).
 
+## Definição do Target
+
+- Regra formal do target binário:
+  - `y = 1` se `Defasagem_{t+1} < 0`
+  - `y = 0` caso contrário
+- Comparador adotado: estritamente `< 0`.
+- Recorte temporal oficial:
+  - Treino: `X(2022) -> y(2023)`
+  - Holdout final: `X(2023) -> y(2024)`
+- Política para qualidade do target em `t+1`:
+  - Tokens inválidos (ex.: `#N/A`, `#DIV/0!`, `INCLUIR`) são convertidos para `NaN` antes da definição de `y`.
+  - Pares com target ausente/inválido são excluídos.
+  - As contagens de exclusão por `missing` e `invalid` são registradas em log.
+- Regra de coorte por `RA`:
+  - Apenas estudantes presentes em ambos os anos consecutivos (`t` e `t+1`) entram nos pares temporais.
+- Regra anti-leakage:
+  - `X` usa somente variáveis de `t`.
+  - `y` é calculado exclusivamente com `Defasagem` de `t+1`.
+  - `RA` é usado apenas como identificador/auditoria, nunca como feature.
+  - O dataset de pares temporais implementa validações anti-leakage e falha caso colunas do ano `t+1` vazem para `X` (ex.: sufixos de merge).
+
 ## Análise das Bases e Dicionário
 
 A análise detalhada do dicionário de dados e das bases `2022`, `2023` e `2024` está documentada em:
@@ -127,34 +148,34 @@ Este checklist foi elaborado considerando explicitamente as inconsistências rea
 Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 
 Progresso geral (barra visual):
-`[🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
+`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`18 de 95 tarefas concluídas (18.9%)`
+`28 de 95 tarefas concluídas (29.5%)`
 
 | Fase | Progresso |
 |---|---|
-| Fase 1 - Entendimento do Problema e Target | 3/11 |
+| Fase 1 - Entendimento do Problema e Target | 11/11 |
 | Fase 2 - Organização do Projeto e Ambiente | 4/7 |
-| Fase 3 - Ingestão, Qualidade e Governança de Dados | 0/14 |
+| Fase 3 - Ingestão, Qualidade e Governança de Dados | 2/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 0/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 0/17 |
 | Fase 6 - Artefatos, API e Deploy | 0/12 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 1/7 |
 | Fase 8 - Documentação e Entrega Final | 10/15 |
-| Total | 18/95 |
+| Total | 28/95 |
 
-### Fase 1 - Entendimento do Problema e Target [3/11]
+### Fase 1 - Entendimento do Problema e Target [11/11]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
 - [x] Estudar o dicionário de dados e as bases de 2022, 2023 e 2024
 - [x] Padronizar a coluna de defasagem (`Defas` -> `Defasagem`)
-- [ ] Definir a formulação do target binário
-- [ ] Definir métrica primária de sucesso (`Recall`) e métricas secundárias (`PR-AUC`, `Precision`, `F1`, `ROC-AUC`) já na fase de desenho
-- [ ] Definir `y = 1` se `Defasagem_{t+1} < 0`
-- [ ] Definir `y = 0` caso contrário
-- [ ] Definir a estratégia de pares temporais
-- [ ] Definir treino: `X(2022) -> y(2023)`
-- [ ] Definir holdout final: `X(2023) -> y(2024)`
-- [ ] Garantir que `RA` seja usado apenas como ID, nunca como feature
+- [x] Definir a formulação do target binário
+- [x] Definir métrica primária de sucesso (`Recall`) e métricas secundárias (`PR-AUC`, `Precision`, `F1`, `ROC-AUC`) já na fase de desenho
+- [x] Definir `y = 1` se `Defasagem_{t+1} < 0`
+- [x] Definir `y = 0` caso contrário
+- [x] Definir a estratégia de pares temporais
+- [x] Definir treino: `X(2022) -> y(2023)`
+- [x] Definir holdout final: `X(2023) -> y(2024)`
+- [x] Garantir que `RA` seja usado apenas como ID, nunca como feature
 
 ### Fase 2 - Organização do Projeto e Ambiente [4/7]
 - [x] Configurar `.gitignore` inicial (ignorar `agents.md`, `dataset/` e `.DS_Store`)
@@ -165,7 +186,7 @@ Progresso geral (barra visual):
 - [ ] Definir `random_state` global para reprodutibilidade
 - [ ] Configurar logging básico do projeto
 
-### Fase 3 - Ingestão, Qualidade e Governança de Dados [0/14]
+### Fase 3 - Ingestão, Qualidade e Governança de Dados [2/14]
 Camadas conceituais desta fase:
 - Camada A - Pré-ingestão e Ingestão: contrato de dados, mapeamento de colunas equivalentes, tratamento de headers duplicados, normalização de valores inválidos, padronização de datas e normalização semântica.
 - Camada B - Governança e Validação Contínua: coorte temporal por `RA`, validações de shift, versionamento de dataset e privacidade operacional.
@@ -176,7 +197,7 @@ Nota de coorte temporal:
 - [ ] Implementar leitura do arquivo XLSX
 - [ ] Tratar diferenças de colunas entre os anos
 - [ ] Padronizar nomes e tipos de dados
-- [ ] Criar função de geração dos pares temporais (`t -> t+1`)
+- [x] Criar função de geração dos pares temporais (`t -> t+1`)
 - [ ] Validar consistência dos dados (missing, tipos inválidos)
 - [ ] Definir um data contract por ano (nome, tipo e domínio esperado por coluna)
 - [ ] Implementar validação automática do data contract (asserts de nome, tipo e domínio por coluna)
@@ -185,7 +206,7 @@ Nota de coorte temporal:
 - [ ] Normalizar valores inválidos em campos numéricos (ex.: `#N/A`, `#DIV/0!`, `INCLUIR`)
 - [ ] Padronizar datas de nascimento para formato único
 - [ ] Normalizar categorias textuais entre anos (`Menina/Menino` <-> `Feminino/Masculino`; `Escola Pública` <-> `Pública`)
-- [ ] Definir regra formal de coorte temporal por `RA` (entradas, saídas e interseções por ano)
+- [x] Definir regra formal de coorte temporal por `RA` (entradas, saídas e interseções por ano)
 - [ ] Gerar e registrar estatísticas de interseção por `RA` entre anos (contagem absoluta e percentual)
 
 ### Fase 4 - Pré-processamento e Engenharia de Features [0/10]

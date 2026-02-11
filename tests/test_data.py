@@ -79,3 +79,135 @@ def test_load_year_sheet_applies_standardization(monkeypatch: pytest.MonkeyPatch
     assert "Defas" not in result.columns
     assert result["Defasagem"].tolist() == [-4]
 
+
+def test_make_target_binary_rule() -> None:
+    values = pd.Series([-0.1, 0.0, 2.0], dtype=float)
+    result = data.make_target(values)
+    assert result.tolist() == [1, 0, 0]
+    assert result.dtype == int
+    assert result.name == "target"
+
+
+def test_make_target_rejects_non_numeric_series() -> None:
+    values = pd.Series(["-1", "0"], dtype=object)
+    with pytest.raises(TypeError, match="série numérica"):
+        data.make_target(values)
+
+
+def test_make_target_rejects_nan_values() -> None:
+    values = pd.Series([1.0, None], dtype=float)
+    with pytest.raises(ValueError, match="não aceita NaN"):
+        data.make_target(values)
+
+
+def test_make_temporal_pairs_builds_cohort_and_excludes_invalid_target(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    df_t = pd.DataFrame(
+        {
+            "RA": [1, 2, 3, 4],
+            "Defasagem": [-1, 0, 1, -2],
+            "Nota": [10, 20, 30, 40],
+        }
+    )
+    df_t1 = pd.DataFrame(
+        {
+            "RA": [1, 2, 3, 9],
+            "Defasagem": [-2, None, "INCLUIR", 0],
+            "NotaFutura": [100, 200, 300, 900],
+        }
+    )
+
+    with caplog.at_level("INFO"):
+        X, y, ids = data.make_temporal_pairs(df_t, df_t1, year_t=2022, year_t1=2023)
+
+    assert len(X) == len(y) == len(ids) == 1
+    assert ids.tolist() == [1]
+    assert y.tolist() == [1]
+    assert "RA" not in X.columns
+    assert "NotaFutura" not in X.columns
+    assert "__defasagem_next__" not in X.columns
+    assert not any(col.endswith("_x") or col.endswith("_y") for col in X.columns)
+    assert set(y.unique().tolist()).issubset({0, 1})
+    assert "excluded_missing=1" in caplog.text
+    assert "excluded_invalid=1" in caplog.text
+    assert "Temporal pairs 2022->2023" in caplog.text
+    assert "RA=" not in caplog.text
+
+
+def test_make_temporal_pairs_raises_when_target_column_is_missing() -> None:
+    df_t = pd.DataFrame({"RA": [1], "Defasagem": [0], "Nota": [10]})
+    df_t1 = pd.DataFrame({"RA": [1], "OutraColuna": [1]})
+
+    with pytest.raises(ValueError, match="year=2023") as error:
+        data.make_temporal_pairs(df_t, df_t1, year_t=2022, year_t1=2023)
+
+    assert "Colunas disponíveis" in str(error.value)
+
+
+def test_make_temporal_pairs_keeps_only_columns_from_t_when_names_overlap() -> None:
+    df_t = pd.DataFrame(
+        {
+            "RA": [10, 11],
+            "Nota": [7.5, 8.0],
+            "__defasagem_next__": [111, 222],
+        }
+    )
+    df_t1 = pd.DataFrame(
+        {
+            "RA": [10, 11],
+            "Defasagem": [-1.0, 1.0],
+            "Nota": [70, 80],
+            "ExtraT1": ["a", "b"],
+        }
+    )
+
+    X, y, ids = data.make_temporal_pairs(df_t, df_t1, year_t=2023, year_t1=2024)
+
+    assert list(X.columns) == ["Nota", "__defasagem_next__"]
+    assert "ExtraT1" not in X.columns
+    assert not any(col.endswith("_x") or col.endswith("_y") for col in X.columns)
+    assert ids.tolist() == [10, 11]
+    assert y.tolist() == [1, 0]
+
+
+def test_make_temporal_pairs_raises_on_unexpected_merge_columns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_merge = pd.DataFrame.merge
+
+    def fake_merge(self: pd.DataFrame, *args, **kwargs) -> pd.DataFrame:
+        merged = original_merge(self, *args, **kwargs)
+        merged["Mat_y"] = [999] * len(merged)
+        return merged
+
+    monkeypatch.setattr(pd.DataFrame, "merge", fake_merge)
+
+    df_t = pd.DataFrame({"RA": [1], "Mat": [7.0]})
+    df_t1 = pd.DataFrame({"RA": [1], "Defasagem": [-1.0]})
+
+    with pytest.raises(ValueError, match=r"2022->2023") as error:
+        data.make_temporal_pairs(df_t, df_t1, year_t=2022, year_t1=2023)
+
+    assert "extras=['Mat_y']" in str(error.value)
+
+
+def test_load_pede_workbook_loads_all_years_with_standardization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sheets = {
+        "PEDE2022": pd.DataFrame({"RA": [1], "Defas": [-1]}),
+        "PEDE2023": pd.DataFrame({"RA": [1], "Defasagem": [0]}),
+        "PEDE2024": pd.DataFrame({"RA": [1], "Defasagem": [1]}),
+    }
+
+    def fake_read_excel(_file_path, sheet_name, **_kwargs) -> pd.DataFrame:
+        return sheets[sheet_name]
+
+    monkeypatch.setattr(data.pd, "read_excel", fake_read_excel)
+
+    datasets = data.load_pede_workbook("fake.xlsx")
+
+    assert set(datasets.keys()) == {2022, 2023, 2024}
+    for year in (2022, 2023, 2024):
+        assert "Defasagem" in datasets[year].columns
