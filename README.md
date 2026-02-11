@@ -34,6 +34,7 @@ O modelo tem caráter preditivo e não causal, sendo utilizado exclusivamente co
 A análise detalhada do dicionário de dados e das bases `2022`, `2023` e `2024` está documentada em:
 
 - [docs/analise_bases_e_dicionario.md](docs/analise_bases_e_dicionario.md)
+- Regra de ingestão aplicada: `Defas` (2022) é padronizada para `Defasagem` para manter schema único entre anos.
 
 ## 📁 Estrutura do Projeto
 
@@ -96,6 +97,29 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
+### Execução de Testes
+
+1) Instalar dependências de desenvolvimento
+
+```bash
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+```
+
+2) Rodar suíte de testes
+
+```bash
+pytest -q
+```
+
+3) Rodar testes com cobertura (comando oficial do projeto)
+
+```bash
+pytest --cov=src --cov-report=term-missing --cov-fail-under=80
+```
+
+Observação: mantenha este comando de cobertura sempre documentado no `README.md` para padronizar validação local e evidência técnica da entrega.
+
 ## Checklist do Projeto - Datathon Machine Learning Engineering
 
 Este checklist foi elaborado considerando explicitamente as inconsistências reais do dataset fornecido (schemas distintos entre anos, colunas duplicadas, valores inválidos, mudanças semânticas de campos e interseção parcial de estudantes entre períodos). As etapas descritas adotam práticas de Data Engineering e MLOps para garantir robustez, reprodutibilidade e validade estatística do modelo em produção.
@@ -103,26 +127,26 @@ Este checklist foi elaborado considerando explicitamente as inconsistências rea
 Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 
 Progresso geral (barra visual):
-`[🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
+`[🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`14 de 95 tarefas concluídas (14.7%)`
+`18 de 95 tarefas concluídas (18.9%)`
 
 | Fase | Progresso |
 |---|---|
-| Fase 1 - Entendimento do Problema e Target | 2/11 |
-| Fase 2 - Organização do Projeto e Ambiente | 2/7 |
+| Fase 1 - Entendimento do Problema e Target | 3/11 |
+| Fase 2 - Organização do Projeto e Ambiente | 4/7 |
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 0/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 0/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 0/17 |
 | Fase 6 - Artefatos, API e Deploy | 0/12 |
-| Fase 7 - Testes, Monitoramento e Dashboard | 0/7 |
+| Fase 7 - Testes, Monitoramento e Dashboard | 1/7 |
 | Fase 8 - Documentação e Entrega Final | 10/15 |
-| Total | 14/95 |
+| Total | 18/95 |
 
-### Fase 1 - Entendimento do Problema e Target [2/11]
+### Fase 1 - Entendimento do Problema e Target [3/11]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
 - [x] Estudar o dicionário de dados e as bases de 2022, 2023 e 2024
-- [ ] Padronizar a coluna de defasagem (`Defas` -> `Defasagem`)
+- [x] Padronizar a coluna de defasagem (`Defas` -> `Defasagem`)
 - [ ] Definir a formulação do target binário
 - [ ] Definir métrica primária de sucesso (`Recall`) e métricas secundárias (`PR-AUC`, `Precision`, `F1`, `ROC-AUC`) já na fase de desenho
 - [ ] Definir `y = 1` se `Defasagem_{t+1} < 0`
@@ -132,12 +156,12 @@ Progresso geral (barra visual):
 - [ ] Definir holdout final: `X(2023) -> y(2024)`
 - [ ] Garantir que `RA` seja usado apenas como ID, nunca como feature
 
-### Fase 2 - Organização do Projeto e Ambiente [2/7]
+### Fase 2 - Organização do Projeto e Ambiente [4/7]
 - [x] Configurar `.gitignore` inicial (ignorar `agents.md`, `dataset/` e `.DS_Store`)
 - [x] Expandir `.gitignore` com padrões essenciais de Python/MLOps (cache, venv, cobertura, builds, logs e segredos locais)
 - [ ] Criar estrutura de diretórios do projeto
-- [ ] Criar `requirements.txt` com dependências mínimas
-- [ ] Fixar versões das dependências para garantir reprodutibilidade do ambiente de execução
+- [x] Criar `requirements.txt` com dependências mínimas
+- [x] Fixar versões das dependências para garantir reprodutibilidade do ambiente de execução
 - [ ] Definir `random_state` global para reprodutibilidade
 - [ ] Configurar logging básico do projeto
 
@@ -212,9 +236,9 @@ Nota de shift temporal:
 - [ ] Criar Dockerfile enxuto baseado em `python:slim`
 - [ ] Documentar comandos de build e run no README
 
-### Fase 7 - Testes, Monitoramento e Dashboard [0/7]
+### Fase 7 - Testes, Monitoramento e Dashboard [1/7]
 - [ ] Criar testes unitários e de integração com pytest
-- [ ] Garantir cobertura mínima de 80% com `pytest-cov`
+- [x] Garantir cobertura mínima de 80% com `pytest-cov`
 - [ ] Implementar teste de não-regressão do modelo com limiares mínimos de métricas (ex.: Recall e/ou PR-AUC)
 - [ ] Configurar logging estruturado
 - [ ] Aplicar política de privacidade operacional (não logar identificadores sensíveis como `RA` em API e monitoramento)
