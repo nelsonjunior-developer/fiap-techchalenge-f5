@@ -1,7 +1,21 @@
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
 import src.data as data
+
+
+def _write_workbook(tmp_path: Path, sheets: dict[str, pd.DataFrame]) -> Path:
+    workbook_path = tmp_path / "pede_test.xlsx"
+    with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
+        for sheet_name, df in sheets.items():
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+    return workbook_path
+
+
+def test_year_to_sheet_mapping_is_correct() -> None:
+    assert data.YEAR_TO_SHEET == {2022: "PEDE2022", 2023: "PEDE2023", 2024: "PEDE2024"}
 
 
 def test_standardize_columns_renames_defas_for_2022() -> None:
@@ -62,15 +76,13 @@ def test_standardize_columns_prefers_defasagem_when_multiple_candidates_exist() 
     assert "Defasagem.1" not in result.columns
 
 
-def test_load_year_sheet_applies_standardization(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_read_excel(*args, **kwargs) -> pd.DataFrame:
-        assert kwargs["sheet_name"] == "PEDE2022"
-        return pd.DataFrame({"RA": [501], " Defas ": [-4]})
-
-    monkeypatch.setattr(data.pd, "read_excel", fake_read_excel)
-
+def test_load_year_sheet_applies_standardization(tmp_path: Path) -> None:
+    workbook_path = _write_workbook(
+        tmp_path,
+        {"PEDE2022": pd.DataFrame({"RA": [501], " Defas ": [-4]})},
+    )
     result = data.load_year_sheet(
-        file_path="dataset/DATATHON/BASE DE DADOS PEDE 2024 - DATATHON.xlsx",
+        file_path=workbook_path,
         sheet_name="PEDE2022",
         year=2022,
     )
@@ -192,21 +204,54 @@ def test_make_temporal_pairs_raises_on_unexpected_merge_columns(
     assert "extras=['Mat_y']" in str(error.value)
 
 
-def test_load_pede_workbook_loads_all_years_with_standardization(
-    monkeypatch: pytest.MonkeyPatch,
+def test_load_pede_workbook_raw_raises_file_not_found() -> None:
+    with pytest.raises(FileNotFoundError, match="DATASET_PATH"):
+        data.load_pede_workbook_raw("arquivo_inexistente.xlsx")
+
+
+def test_load_year_sheet_raw_raises_clear_error_when_sheet_is_missing(tmp_path: Path) -> None:
+    workbook_path = _write_workbook(
+        tmp_path,
+        {"PEDE2022": pd.DataFrame({"RA": [1], "Defas": [-1]})},
+    )
+
+    with pytest.raises(ValueError, match="PEDE2023") as error:
+        data.load_year_sheet_raw(workbook_path, 2023)
+
+    message = str(error.value)
+    assert "year=2023" in message
+    assert "PEDE2022" in message
+
+
+def test_load_pede_workbook_raw_loads_three_years_without_standardization(
+    tmp_path: Path,
 ) -> None:
-    sheets = {
-        "PEDE2022": pd.DataFrame({"RA": [1], "Defas": [-1]}),
-        "PEDE2023": pd.DataFrame({"RA": [1], "Defasagem": [0]}),
-        "PEDE2024": pd.DataFrame({"RA": [1], "Defasagem": [1]}),
-    }
+    workbook_path = _write_workbook(
+        tmp_path,
+        {
+            "PEDE2022": pd.DataFrame({"RA": [1], "Defas": [-1]}),
+            "PEDE2023": pd.DataFrame({"RA": [1], "Defasagem": [0]}),
+            "PEDE2024": pd.DataFrame({"RA": [1], "Defasagem": [1]}),
+        },
+    )
 
-    def fake_read_excel(_file_path, sheet_name, **_kwargs) -> pd.DataFrame:
-        return sheets[sheet_name]
+    datasets = data.load_pede_workbook_raw(workbook_path)
+    assert set(datasets.keys()) == {2022, 2023, 2024}
+    assert "Defas" in datasets[2022].columns
+    assert "Defasagem" not in datasets[2022].columns
 
-    monkeypatch.setattr(data.pd, "read_excel", fake_read_excel)
 
-    datasets = data.load_pede_workbook("fake.xlsx")
+def test_load_pede_workbook_wrapper_keeps_standardization_contract(tmp_path: Path) -> None:
+    workbook_path = _write_workbook(
+        tmp_path,
+        {
+            "PEDE2022": pd.DataFrame({"RA": [1], "Defas": [-1]}),
+            "PEDE2023": pd.DataFrame({"RA": [1], "Defasagem": [0]}),
+            "PEDE2024": pd.DataFrame({"RA": [1], "Defasagem": [1]}),
+        },
+    )
+
+    datasets = data.load_pede_workbook(workbook_path)
 
     assert set(datasets.keys()) == {2022, 2023, 2024}
     for year in (2022, 2023, 2024):

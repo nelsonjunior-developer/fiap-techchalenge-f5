@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import Mapping
@@ -13,11 +14,85 @@ _SPACES_RE = re.compile(r"\s+")
 _DUPLICATE_SUFFIX_RE = re.compile(r"\.\d+$")
 _logger = get_logger(__name__)
 
-DEFAULT_SHEETS_BY_YEAR: dict[int, str] = {
+YEAR_TO_SHEET: dict[int, str] = {
     2022: "PEDE2022",
     2023: "PEDE2023",
     2024: "PEDE2024",
 }
+DEFAULT_SHEETS_BY_YEAR: dict[int, str] = dict(YEAR_TO_SHEET)
+_DEFAULT_DATASET_RELATIVE_PATH = Path(
+    "dataset/DATATHON/BASE DE DADOS PEDE 2024 - DATATHON.xlsx"
+)
+
+
+def _ensure_dataset_exists(path: str | Path) -> Path:
+    resolved = Path(path)
+    if not resolved.exists():
+        raise FileNotFoundError(
+            f"Arquivo XLSX não encontrado em '{resolved}'. "
+            "Defina DATASET_PATH com o caminho correto do dataset."
+        )
+    return resolved
+
+
+def _validate_year(year: int) -> None:
+    if year not in YEAR_TO_SHEET:
+        raise ValueError(
+            f"Ano inválido: {year}. "
+            f"Anos suportados: {sorted(YEAR_TO_SHEET)}"
+        )
+
+
+def get_default_dataset_path() -> Path:
+    """Resolve default dataset path using DATASET_PATH or project fallback path."""
+    env_path = os.getenv("DATASET_PATH")
+    candidate = Path(env_path) if env_path else _DEFAULT_DATASET_RELATIVE_PATH
+    return _ensure_dataset_exists(candidate)
+
+
+def _load_sheet_from_workbook(
+    path: str | Path,
+    year: int,
+    sheet_name: str,
+    *,
+    read_excel_kwargs: Mapping[str, object] | None = None,
+) -> pd.DataFrame:
+    path_obj = _ensure_dataset_exists(path)
+    excel_file = pd.ExcelFile(path_obj, engine="openpyxl")
+    available_sheets = excel_file.sheet_names
+    if sheet_name not in available_sheets:
+        raise ValueError(
+            f"Aba esperada '{sheet_name}' ausente para year={year}. "
+            f"Abas disponíveis: {available_sheets}"
+        )
+
+    parse_kwargs = dict(read_excel_kwargs or {})
+    df = excel_file.parse(sheet_name=sheet_name, **parse_kwargs)
+    _logger.info(
+        "Loaded XLSX sheet | file=%s year=%d sheet=%s rows=%d cols=%d",
+        path_obj.name,
+        year,
+        sheet_name,
+        df.shape[0],
+        df.shape[1],
+    )
+    return df
+
+
+def load_year_sheet_raw(path: str | Path, year: int) -> pd.DataFrame:
+    """Read raw year sheet from XLSX without any schema standardization."""
+    _validate_year(year)
+    sheet_name = YEAR_TO_SHEET[year]
+    return _load_sheet_from_workbook(path, year, sheet_name)
+
+
+def load_pede_workbook_raw(path: str | Path) -> dict[int, pd.DataFrame]:
+    """Read raw PEDE sheets (2022/2023/2024) without transformations."""
+    path_obj = _ensure_dataset_exists(path)
+    datasets: dict[int, pd.DataFrame] = {}
+    for year in sorted(YEAR_TO_SHEET):
+        datasets[year] = load_year_sheet_raw(path_obj, year)
+    return datasets
 
 
 def _normalize_header(name: object) -> str:
@@ -79,9 +154,31 @@ def load_year_sheet(
     year: int,
     **read_excel_kwargs: object,
 ) -> pd.DataFrame:
-    """Read one year/sheet and standardize the Defasagem column name."""
-    df = pd.read_excel(file_path, sheet_name=sheet_name, **read_excel_kwargs)
-    return standardize_columns(df, year=year)
+    """Compatibility wrapper: read sheet then apply standardize_columns."""
+    _validate_year(year)
+    expected_sheet = YEAR_TO_SHEET[year]
+    if sheet_name != expected_sheet:
+        raise ValueError(
+            f"sheet_name inválido para year={year}: '{sheet_name}'. "
+            f"Esperado: '{expected_sheet}'"
+        )
+
+    if read_excel_kwargs:
+        raw_df = _load_sheet_from_workbook(
+            file_path,
+            year,
+            sheet_name,
+            read_excel_kwargs=read_excel_kwargs,
+        )
+    else:
+        raw_df = load_year_sheet_raw(file_path, year)
+    return standardize_columns(raw_df, year=year)
+
+
+def load_year(path: str | Path, year: int) -> pd.DataFrame:
+    """Read one year and return standardized columns for downstream usage."""
+    raw_df = load_year_sheet_raw(path, year)
+    return standardize_columns(raw_df, year=year)
 
 
 def load_pede_workbook(
@@ -89,17 +186,27 @@ def load_pede_workbook(
     sheets_by_year: Mapping[int, str] | None = None,
     **read_excel_kwargs: object,
 ) -> dict[int, pd.DataFrame]:
-    """Read PEDE sheets and return one standardized DataFrame per year."""
-    resolved_mapping = dict(sheets_by_year or DEFAULT_SHEETS_BY_YEAR)
-    datasets: dict[int, pd.DataFrame] = {}
-    for year, sheet_name in resolved_mapping.items():
-        datasets[year] = load_year_sheet(
-            file_path=file_path,
-            sheet_name=sheet_name,
-            year=year,
-            **read_excel_kwargs,
-        )
-    return datasets
+    """Compatibility wrapper: load workbook raw then standardize per year."""
+    resolved_mapping = dict(sheets_by_year or YEAR_TO_SHEET)
+    path_obj = _ensure_dataset_exists(file_path)
+
+    if resolved_mapping == YEAR_TO_SHEET and not read_excel_kwargs:
+        raw_datasets = load_pede_workbook_raw(path_obj)
+    else:
+        raw_datasets = {}
+        for year, sheet_name in resolved_mapping.items():
+            _validate_year(year)
+            raw_datasets[year] = _load_sheet_from_workbook(
+                path_obj,
+                year,
+                sheet_name,
+                read_excel_kwargs=read_excel_kwargs,
+            )
+
+    standardized: dict[int, pd.DataFrame] = {}
+    for year, df in raw_datasets.items():
+        standardized[year] = standardize_columns(df, year=year)
+    return standardized
 
 
 def make_target(defasagem_next: pd.Series) -> pd.Series:

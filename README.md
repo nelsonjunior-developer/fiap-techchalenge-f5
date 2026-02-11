@@ -58,6 +58,14 @@ A análise detalhada do dicionário de dados e das bases `2022`, `2023` e `2024`
 - [docs/analise_bases_e_dicionario.md](docs/analise_bases_e_dicionario.md)
 - Regra de ingestão aplicada: `Defas` (2022) é padronizada para `Defasagem` para manter schema único entre anos.
 
+## Dados e Ingestão
+
+- O arquivo XLSX do projeto contém as abas `PEDE2022`, `PEDE2023` e `PEDE2024`.
+- O caminho do arquivo pode ser configurado via `DATASET_PATH`.
+- A leitura raw foi separada da padronização:
+  - `load_pede_workbook_raw` / `load_year_sheet_raw`: apenas leitura.
+  - `load_pede_workbook` / `load_year_sheet`: wrappers com padronização.
+
 ## 📁 Estrutura do Projeto
 
 O repositório é organizado para separar claramente ingestão e tratamento de dados, treinamento do modelo, disponibilização via API, monitoramento e testes, garantindo manutenibilidade, reprodutibilidade e facilidade de deploy.
@@ -142,19 +150,19 @@ Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 Progresso geral (barra visual):
 `[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`31 de 95 tarefas concluídas (32.6%)`
+`32 de 95 tarefas concluídas (33.7%)`
 
 | Fase | Progresso |
 |---|---|
 | Fase 1 - Entendimento do Problema e Target | 11/11 |
 | Fase 2 - Organização do Projeto e Ambiente | 7/7 |
-| Fase 3 - Ingestão, Qualidade e Governança de Dados | 2/14 |
+| Fase 3 - Ingestão, Qualidade e Governança de Dados | 3/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 0/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 0/17 |
 | Fase 6 - Artefatos, API e Deploy | 0/12 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 1/7 |
 | Fase 8 - Documentação e Entrega Final | 10/15 |
-| Total | 31/95 |
+| Total | 32/95 |
 
 ### Fase 1 - Entendimento do Problema e Target [11/11]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
@@ -178,7 +186,7 @@ Progresso geral (barra visual):
 - [x] Definir `random_state` global para reprodutibilidade
 - [x] Configurar logging básico do projeto
 
-### Fase 3 - Ingestão, Qualidade e Governança de Dados [2/14]
+### Fase 3 - Ingestão, Qualidade e Governança de Dados [3/14]
 Camadas conceituais desta fase:
 - Camada A - Pré-ingestão e Ingestão: contrato de dados, mapeamento de colunas equivalentes, tratamento de headers duplicados, normalização de valores inválidos, padronização de datas e normalização semântica.
 - Camada B - Governança e Validação Contínua: coorte temporal por `RA`, validações de shift, versionamento de dataset e privacidade operacional.
@@ -186,7 +194,7 @@ Camadas conceituais desta fase:
 Nota de coorte temporal:
 > A construção dos pares temporais considera apenas estudantes presentes em ambos os anos consecutivos (`t` e `t+1`), evitando viés por evasão ou entrada tardia e garantindo consistência estatística na definição do target.
 
-- [ ] Implementar leitura do arquivo XLSX
+- [x] Implementar leitura do arquivo XLSX
 - [ ] Tratar diferenças de colunas entre os anos
 - [ ] Padronizar nomes e tipos de dados
 - [x] Criar função de geração dos pares temporais (`t -> t+1`)
