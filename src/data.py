@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import logging
 import re
 from pathlib import Path
 from typing import Mapping
 
 import pandas as pd
+from src.utils import get_logger
 
 _SPACES_RE = re.compile(r"\s+")
 _DUPLICATE_SUFFIX_RE = re.compile(r"\.\d+$")
-_logger = logging.getLogger(__name__)
+_logger = get_logger(__name__)
 
 DEFAULT_SHEETS_BY_YEAR: dict[int, str] = {
     2022: "PEDE2022",

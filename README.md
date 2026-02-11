@@ -119,6 +119,20 @@ pytest --cov=src --cov-report=term-missing --cov-fail-under=80
 
 Observação: mantenha este comando de cobertura sempre documentado no `README.md` para padronizar validação local e evidência técnica da entrega.
 
+## Logging
+
+- Logging básico centralizado em `src/utils.py` com `setup_logging()` e `get_logger()`.
+- Nível padrão: `INFO`. Para ajustar em runtime:
+  - `LOG_LEVEL=DEBUG` (ou `INFO`, `WARNING`, `ERROR`)
+  - Valores inválidos de `LOG_LEVEL` fazem fallback para `INFO` (com warning em log).
+- Saída padrão: `stdout`.
+- Opcional: habilitar arquivo em `logs/app.log` com:
+  - `LOG_TO_FILE=1`
+- Idempotência: `setup_logging()` pode ser chamado múltiplas vezes sem duplicar handlers/logs.
+- Privacidade operacional:
+  - Não logar `RA`, listas de identificadores, payloads completos ou dados pessoais.
+  - Logar apenas métricas agregadas e contadores operacionais.
+
 ## Checklist do Projeto - Datathon Machine Learning Engineering
 
 Este checklist foi elaborado considerando explicitamente as inconsistências reais do dataset fornecido (schemas distintos entre anos, colunas duplicadas, valores inválidos, mudanças semânticas de campos e interseção parcial de estudantes entre períodos). As etapas descritas adotam práticas de Data Engineering e MLOps para garantir robustez, reprodutibilidade e validade estatística do modelo em produção.
@@ -126,21 +140,21 @@ Este checklist foi elaborado considerando explicitamente as inconsistências rea
 Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 
 Progresso geral (barra visual):
-`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
+`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`30 de 95 tarefas concluídas (31.6%)`
+`31 de 95 tarefas concluídas (32.6%)`
 
 | Fase | Progresso |
 |---|---|
 | Fase 1 - Entendimento do Problema e Target | 11/11 |
-| Fase 2 - Organização do Projeto e Ambiente | 6/7 |
+| Fase 2 - Organização do Projeto e Ambiente | 7/7 |
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 2/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 0/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 0/17 |
 | Fase 6 - Artefatos, API e Deploy | 0/12 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 1/7 |
 | Fase 8 - Documentação e Entrega Final | 10/15 |
-| Total | 30/95 |
+| Total | 31/95 |
 
 ### Fase 1 - Entendimento do Problema e Target [11/11]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
@@ -155,14 +169,14 @@ Progresso geral (barra visual):
 - [x] Definir holdout final: `X(2023) -> y(2024)`
 - [x] Garantir que `RA` seja usado apenas como ID, nunca como feature
 
-### Fase 2 - Organização do Projeto e Ambiente [6/7]
+### Fase 2 - Organização do Projeto e Ambiente [7/7]
 - [x] Configurar `.gitignore` inicial (ignorar `agents.md`, `dataset/` e `.DS_Store`)
 - [x] Expandir `.gitignore` com padrões essenciais de Python/MLOps (cache, venv, cobertura, builds, logs e segredos locais)
 - [x] Criar estrutura de diretórios do projeto
 - [x] Criar `requirements.txt` com dependências mínimas
 - [x] Fixar versões das dependências para garantir reprodutibilidade do ambiente de execução
 - [x] Definir `random_state` global para reprodutibilidade
-- [ ] Configurar logging básico do projeto
+- [x] Configurar logging básico do projeto
 
 ### Fase 3 - Ingestão, Qualidade e Governança de Dados [2/14]
 Camadas conceituais desta fase:

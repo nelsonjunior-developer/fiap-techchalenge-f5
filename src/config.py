@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import random
+from src.utils import get_logger
 
 
 RANDOM_STATE: int = 42
 SEED: int = RANDOM_STATE
+_logger = get_logger(__name__)
 
 
 def set_global_seed(seed: int = RANDOM_STATE) -> None:
@@ -20,3 +22,4 @@ def set_global_seed(seed: int = RANDOM_STATE) -> None:
         # Keep this helper dependency-free even when numpy is unavailable.
         pass
 
+    _logger.info("Global seed configured | seed=%d", seed)
