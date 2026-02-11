@@ -8,11 +8,11 @@ from pathlib import Path
 from typing import Mapping
 
 import pandas as pd
+from src.schema import align_years, harmonize_schema_year, normalize_headers
 from src.utils import get_logger
 
-_SPACES_RE = re.compile(r"\s+")
-_DUPLICATE_SUFFIX_RE = re.compile(r"\.\d+$")
 _logger = get_logger(__name__)
+_DEFAS_SUFFIX_RE = re.compile(r"\.\d+$")
 
 YEAR_TO_SHEET: dict[int, str] = {
     2022: "PEDE2022",
@@ -95,57 +95,42 @@ def load_pede_workbook_raw(path: str | Path) -> dict[int, pd.DataFrame]:
     return datasets
 
 
-def _normalize_header(name: object) -> str:
-    text = "" if name is None else str(name)
-    text = _SPACES_RE.sub(" ", text).strip()
-    return text
-
-
-def _defas_base_name(column_name: str) -> str | None:
-    normalized = _normalize_header(column_name).lower()
-    normalized = _DUPLICATE_SUFFIX_RE.sub("", normalized)
-    if normalized in {"defas", "defasagem"}:
-        return normalized
-    return None
-
-
 def standardize_columns(df: pd.DataFrame, year: int) -> pd.DataFrame:
-    """Standardize schema differences by renaming Defas (2022) to Defasagem."""
-    standardized = df.copy()
-    standardized.columns = [_normalize_header(col) for col in standardized.columns]
+    """Compatibility wrapper delegating schema harmonization for one year."""
+    normalized = normalize_headers(df)
 
     candidates: list[tuple[int, str]] = []
-    for idx, col in enumerate(standardized.columns):
-        base_name = _defas_base_name(col)
-        if base_name is not None:
+    for idx, col in enumerate(normalized.columns):
+        base_name = _DEFAS_SUFFIX_RE.sub("", str(col).strip()).lower()
+        if base_name in {"defas", "defasagem"}:
             candidates.append((idx, base_name))
 
     if not candidates:
         raise ValueError(
             f"Nenhuma coluna de defasagem encontrada para year={year}. "
-            f"Colunas disponíveis: {list(standardized.columns)}"
+            f"Colunas disponíveis: {list(normalized.columns)}"
         )
 
     preferred_candidates = [item for item in candidates if item[1] == "defasagem"]
     chosen_idx = preferred_candidates[0][0] if preferred_candidates else candidates[0][0]
-
-    merged_defasagem = standardized.iloc[:, chosen_idx].copy()
+    merged_defasagem = normalized.iloc[:, chosen_idx].copy()
     for idx, _ in candidates:
         if idx == chosen_idx:
             continue
         merged_defasagem = merged_defasagem.where(
-            merged_defasagem.notna(), standardized.iloc[:, idx]
+            merged_defasagem.notna(), normalized.iloc[:, idx]
         )
 
-    candidate_positions = {idx for idx, _ in candidates}
-    keep_positions = [
-        idx for idx in range(standardized.shape[1]) if idx not in candidate_positions
-    ]
-    result = standardized.iloc[:, keep_positions].copy()
+    harmonized = harmonize_schema_year(normalized, year=year, logger=_logger)
+    harmonized["Defasagem"] = merged_defasagem.values
 
-    insert_position = sum(1 for idx in keep_positions if idx < chosen_idx)
-    result.insert(insert_position, "Defasagem", merged_defasagem)
-    return result
+    drop_defas_dups = [
+        col for col in harmonized.columns if str(col).startswith("Defasagem__dup")
+    ]
+    if drop_defas_dups:
+        harmonized = harmonized.drop(columns=drop_defas_dups)
+
+    return harmonized
 
 
 def load_year_sheet(
@@ -186,7 +171,7 @@ def load_pede_workbook(
     sheets_by_year: Mapping[int, str] | None = None,
     **read_excel_kwargs: object,
 ) -> dict[int, pd.DataFrame]:
-    """Compatibility wrapper: load workbook raw then standardize per year."""
+    """Compatibility wrapper: load workbook raw then harmonize/align yearly schemas."""
     resolved_mapping = dict(sheets_by_year or YEAR_TO_SHEET)
     path_obj = _ensure_dataset_exists(file_path)
 
@@ -206,7 +191,7 @@ def load_pede_workbook(
     standardized: dict[int, pd.DataFrame] = {}
     for year, df in raw_datasets.items():
         standardized[year] = standardize_columns(df, year=year)
-    return standardized
+    return align_years(standardized, years=tuple(sorted(standardized)), logger=_logger)
 
 
 def make_target(defasagem_next: pd.Series) -> pd.Series:

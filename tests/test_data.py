@@ -45,7 +45,9 @@ def test_standardize_columns_handles_whitespace_in_defasagem_header() -> None:
 
     result = data.standardize_columns(df, year=2023)
 
-    assert list(result.columns) == ["RA", "Defasagem"]
+    assert "RA" in result.columns
+    assert "Defasagem" in result.columns
+    assert " Defasagem " not in result.columns
     assert result["Defasagem"].tolist() == [-2]
 
 

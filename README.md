@@ -65,6 +65,26 @@ A análise detalhada do dicionário de dados e das bases `2022`, `2023` e `2024`
 - A leitura raw foi separada da padronização:
   - `load_pede_workbook_raw` / `load_year_sheet_raw`: apenas leitura.
   - `load_pede_workbook` / `load_year_sheet`: wrappers com padronização.
+- A harmonização de schema usa nomes canônicos entre anos, incluindo:
+  - `Defas -> Defasagem`
+  - `Matem -> Mat`, `Portug -> Por`, `Inglês -> Ing`
+  - `Idade 22 -> Idade`
+  - `Fase ideal/Fase Ideal -> Fase_Ideal`
+  - `Nome/Nome Anonimizado -> Nome_Anon`
+  - `Ano nasc/Data de Nasc -> Data_Nasc`
+- Regras de fallback para colunas canônicas derivadas:
+  - `INDE` por ano:
+    - 2022: `INDE 22`
+    - 2023: `INDE 2023` -> `INDE 23` -> `INDE 22`
+    - 2024: `INDE 2024` -> `INDE 23` -> `INDE 22`
+  - `Pedra_Ano` por ano:
+    - 2022: `Pedra 22` -> `Pedra 21` -> `Pedra 20`
+    - 2023: `Pedra 2023` -> `Pedra 23` -> `Pedra 22`
+    - 2024: `Pedra 2024` -> `Pedra 23` -> `Pedra 22`
+- Duplicadas de planilha (`.1`, `.2`, ...) são tratadas de forma determinística como `__dupN`, sem perda silenciosa.
+- Nota semântica importante:
+  - `Ano nasc` e `Data de Nasc` não são semanticamente idênticos (ano vs data completa). Nesta fase harmonizamos apenas header; normalização de conteúdo será feita depois.
+  - `Nome` e `Nome Anonimizado` são harmonizados para `Nome_Anon` apenas para alinhamento de schema; isso não garante anonimização no dado de 2022.
 
 ## 📁 Estrutura do Projeto
 
@@ -148,21 +168,21 @@ Este checklist foi elaborado considerando explicitamente as inconsistências rea
 Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 
 Progresso geral (barra visual):
-`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
+`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`32 de 95 tarefas concluídas (33.7%)`
+`33 de 95 tarefas concluídas (34.7%)`
 
 | Fase | Progresso |
 |---|---|
 | Fase 1 - Entendimento do Problema e Target | 11/11 |
 | Fase 2 - Organização do Projeto e Ambiente | 7/7 |
-| Fase 3 - Ingestão, Qualidade e Governança de Dados | 3/14 |
+| Fase 3 - Ingestão, Qualidade e Governança de Dados | 4/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 0/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 0/17 |
 | Fase 6 - Artefatos, API e Deploy | 0/12 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 1/7 |
 | Fase 8 - Documentação e Entrega Final | 10/15 |
-| Total | 32/95 |
+| Total | 33/95 |
 
 ### Fase 1 - Entendimento do Problema e Target [11/11]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
@@ -186,7 +206,7 @@ Progresso geral (barra visual):
 - [x] Definir `random_state` global para reprodutibilidade
 - [x] Configurar logging básico do projeto
 
-### Fase 3 - Ingestão, Qualidade e Governança de Dados [3/14]
+### Fase 3 - Ingestão, Qualidade e Governança de Dados [4/14]
 Camadas conceituais desta fase:
 - Camada A - Pré-ingestão e Ingestão: contrato de dados, mapeamento de colunas equivalentes, tratamento de headers duplicados, normalização de valores inválidos, padronização de datas e normalização semântica.
 - Camada B - Governança e Validação Contínua: coorte temporal por `RA`, validações de shift, versionamento de dataset e privacidade operacional.
@@ -195,7 +215,7 @@ Nota de coorte temporal:
 > A construção dos pares temporais considera apenas estudantes presentes em ambos os anos consecutivos (`t` e `t+1`), evitando viés por evasão ou entrada tardia e garantindo consistência estatística na definição do target.
 
 - [x] Implementar leitura do arquivo XLSX
-- [ ] Tratar diferenças de colunas entre os anos
+- [x] Tratar diferenças de colunas entre os anos
 - [ ] Padronizar nomes e tipos de dados
 - [x] Criar função de geração dos pares temporais (`t -> t+1`)
 - [ ] Validar consistência dos dados (missing, tipos inválidos)
