@@ -94,6 +94,8 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
+Reprodutibilidade: `RANDOM_STATE = 42` é usado globalmente no projeto.
+
 ### Execução de Testes
 
 1) Instalar dependências de desenvolvimento
@@ -126,19 +128,19 @@ Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 Progresso geral (barra visual):
 `[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`29 de 95 tarefas concluídas (30.5%)`
+`30 de 95 tarefas concluídas (31.6%)`
 
 | Fase | Progresso |
 |---|---|
 | Fase 1 - Entendimento do Problema e Target | 11/11 |
-| Fase 2 - Organização do Projeto e Ambiente | 5/7 |
+| Fase 2 - Organização do Projeto e Ambiente | 6/7 |
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 2/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 0/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 0/17 |
 | Fase 6 - Artefatos, API e Deploy | 0/12 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 1/7 |
 | Fase 8 - Documentação e Entrega Final | 10/15 |
-| Total | 29/95 |
+| Total | 30/95 |
 
 ### Fase 1 - Entendimento do Problema e Target [11/11]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
@@ -153,13 +155,13 @@ Progresso geral (barra visual):
 - [x] Definir holdout final: `X(2023) -> y(2024)`
 - [x] Garantir que `RA` seja usado apenas como ID, nunca como feature
 
-### Fase 2 - Organização do Projeto e Ambiente [5/7]
+### Fase 2 - Organização do Projeto e Ambiente [6/7]
 - [x] Configurar `.gitignore` inicial (ignorar `agents.md`, `dataset/` e `.DS_Store`)
 - [x] Expandir `.gitignore` com padrões essenciais de Python/MLOps (cache, venv, cobertura, builds, logs e segredos locais)
 - [x] Criar estrutura de diretórios do projeto
 - [x] Criar `requirements.txt` com dependências mínimas
 - [x] Fixar versões das dependências para garantir reprodutibilidade do ambiente de execução
-- [ ] Definir `random_state` global para reprodutibilidade
+- [x] Definir `random_state` global para reprodutibilidade
 - [ ] Configurar logging básico do projeto
 
 ### Fase 3 - Ingestão, Qualidade e Governança de Dados [2/14]
