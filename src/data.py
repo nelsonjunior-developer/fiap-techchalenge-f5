@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Mapping
 
 import pandas as pd
+from src.dtypes import standardize_dtypes_all
 from src.schema import align_years, harmonize_schema_year, normalize_headers
 from src.utils import get_logger
 
@@ -191,7 +192,9 @@ def load_pede_workbook(
     standardized: dict[int, pd.DataFrame] = {}
     for year, df in raw_datasets.items():
         standardized[year] = standardize_columns(df, year=year)
-    return align_years(standardized, years=tuple(sorted(standardized)), logger=_logger)
+    aligned = align_years(standardized, years=tuple(sorted(standardized)), logger=_logger)
+    typed_datasets, _ = standardize_dtypes_all(aligned, logger=_logger)
+    return typed_datasets
 
 
 def make_target(defasagem_next: pd.Series) -> pd.Series:

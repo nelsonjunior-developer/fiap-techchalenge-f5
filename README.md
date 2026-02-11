@@ -85,6 +85,13 @@ A análise detalhada do dicionário de dados e das bases `2022`, `2023` e `2024`
 - Nota semântica importante:
   - `Ano nasc` e `Data de Nasc` não são semanticamente idênticos (ano vs data completa). Nesta fase harmonizamos apenas header; normalização de conteúdo será feita depois.
   - `Nome` e `Nome Anonimizado` são harmonizados para `Nome_Anon` apenas para alinhamento de schema; isso não garante anonimização no dado de 2022.
+- Padronização de tipos após harmonização/alinhamento:
+  - `Data_Nasc` é padronizada para `datetime` com desambiguação explícita:
+    - valores numéricos em `1900..2100` são interpretados como ano (`YYYY-01-01`)
+    - demais numéricos são interpretados como serial Excel (`origin=1899-12-30`)
+  - `Idade` é sanitizada para remover valores datetime (ex.: `1900-01-...`, que viram `NaN`) e convertida para `Int64` (nullable).
+  - Colunas numéricas usam dtypes nulos estáveis (`Float64`/`Int64`) com coerção robusta (`to_numeric(..., errors=\"coerce\")`), incluindo tratamento do token `INCLUIR`.
+  - Colunas categóricas são padronizadas para `string` com `strip`.
 
 ## 📁 Estrutura do Projeto
 
@@ -92,16 +99,39 @@ O repositório é organizado para separar claramente ingestão e tratamento de d
 
 ```
 raiz-do-projeto/
-│
+├── README.md
+├── .gitignore
+├── requirements.txt
+├── requirements-dev.txt
+├── agents.md
 ├── app/
 │   └── model/
-├── src/
-├── dashboards/
-├── tests/
-├── docs/
-├── notebooks/
+│       └── .gitkeep
 ├── artifacts/
-└── logs/
+│   └── .gitkeep
+├── dashboards/
+├── docs/
+│   ├── .gitkeep
+│   └── analise_bases_e_dicionario.md
+├── logs/
+│   └── .gitkeep
+├── notebooks/
+│   └── .gitkeep
+├── src/
+│   ├── __init__.py
+│   ├── config.py
+│   ├── data.py
+│   ├── dtypes.py
+│   ├── schema.py
+│   └── utils.py
+└── tests/
+    ├── __init__.py
+    ├── conftest.py
+    ├── test_config.py
+    ├── test_data.py
+    ├── test_dtypes.py
+    ├── test_logging.py
+    └── test_schema.py
 ```
 
 ## Ambiente Local (.venv)
@@ -170,19 +200,19 @@ Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 Progresso geral (barra visual):
 `[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`33 de 95 tarefas concluídas (34.7%)`
+`34 de 95 tarefas concluídas (35.8%)`
 
 | Fase | Progresso |
 |---|---|
 | Fase 1 - Entendimento do Problema e Target | 11/11 |
 | Fase 2 - Organização do Projeto e Ambiente | 7/7 |
-| Fase 3 - Ingestão, Qualidade e Governança de Dados | 4/14 |
+| Fase 3 - Ingestão, Qualidade e Governança de Dados | 5/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 0/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 0/17 |
 | Fase 6 - Artefatos, API e Deploy | 0/12 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 1/7 |
 | Fase 8 - Documentação e Entrega Final | 10/15 |
-| Total | 33/95 |
+| Total | 34/95 |
 
 ### Fase 1 - Entendimento do Problema e Target [11/11]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
@@ -206,7 +236,7 @@ Progresso geral (barra visual):
 - [x] Definir `random_state` global para reprodutibilidade
 - [x] Configurar logging básico do projeto
 
-### Fase 3 - Ingestão, Qualidade e Governança de Dados [4/14]
+### Fase 3 - Ingestão, Qualidade e Governança de Dados [5/14]
 Camadas conceituais desta fase:
 - Camada A - Pré-ingestão e Ingestão: contrato de dados, mapeamento de colunas equivalentes, tratamento de headers duplicados, normalização de valores inválidos, padronização de datas e normalização semântica.
 - Camada B - Governança e Validação Contínua: coorte temporal por `RA`, validações de shift, versionamento de dataset e privacidade operacional.
@@ -216,7 +246,7 @@ Nota de coorte temporal:
 
 - [x] Implementar leitura do arquivo XLSX
 - [x] Tratar diferenças de colunas entre os anos
-- [ ] Padronizar nomes e tipos de dados
+- [x] Padronizar nomes e tipos de dados
 - [x] Criar função de geração dos pares temporais (`t -> t+1`)
 - [ ] Validar consistência dos dados (missing, tipos inválidos)
 - [ ] Definir um data contract por ano (nome, tipo e domínio esperado por coluna)

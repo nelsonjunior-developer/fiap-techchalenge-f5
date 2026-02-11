@@ -247,9 +247,9 @@ def test_load_pede_workbook_wrapper_keeps_standardization_contract(tmp_path: Pat
     workbook_path = _write_workbook(
         tmp_path,
         {
-            "PEDE2022": pd.DataFrame({"RA": [1], "Defas": [-1]}),
-            "PEDE2023": pd.DataFrame({"RA": [1], "Defasagem": [0]}),
-            "PEDE2024": pd.DataFrame({"RA": [1], "Defasagem": [1]}),
+            "PEDE2022": pd.DataFrame({"RA": [1], "Defas": [-1], "INDE 22": ["INCLUIR"]}),
+            "PEDE2023": pd.DataFrame({"RA": [1], "Defasagem": [0], "INDE 2023": [0.5]}),
+            "PEDE2024": pd.DataFrame({"RA": [1], "Defasagem": [1], "INDE 2024": [0.7]}),
         },
     )
 
@@ -258,3 +258,6 @@ def test_load_pede_workbook_wrapper_keeps_standardization_contract(tmp_path: Pat
     assert set(datasets.keys()) == {2022, 2023, 2024}
     for year in (2022, 2023, 2024):
         assert "Defasagem" in datasets[year].columns
+        assert str(datasets[year]["RA"].dtype) == "string"
+    assert str(datasets[2022]["INDE"].dtype) == "Float64"
+    assert datasets[2022]["INDE"].isna().all()
