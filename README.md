@@ -49,6 +49,7 @@ O modelo tem caráter preditivo e não causal, sendo utilizado exclusivamente co
   - `y` é calculado exclusivamente com `Defasagem` de `t+1`.
   - `RA` é usado apenas como identificador/auditoria, nunca como feature.
   - O dataset de pares temporais implementa validações anti-leakage e falha caso colunas do ano `t+1` vazem para `X` (ex.: sufixos de merge).
+- A métrica primária de sucesso é Recall (minimizar falsos negativos). Como métricas secundárias de acompanhamento e trade-off, reportamos PR-AUC (Average Precision), Precision, F1-score e ROC-AUC.
 
 ## Análise das Bases e Dicionário
 
@@ -64,40 +65,15 @@ O repositório é organizado para separar claramente ingestão e tratamento de d
 ```
 raiz-do-projeto/
 │
-├── app/                         # Camada da API (FastAPI)
-│   ├── main.py                  # Ponto de entrada da aplicação FastAPI
-│   ├── routes.py                # Rotas da API (/predict, /health, /version)
-│   ├── schemas.py               # Schemas de requisição/resposta (Pydantic)
+├── app/
 │   └── model/
-│       ├── model.joblib         # Pipeline de ML treinada (serializada)
-│       ├── metadata.json        # Metadados do modelo (métricas, threshold, versão)
-│       └── reference_data.csv   # Dataset de referência para monitoramento de drift
-│
-├── src/                         # Pipeline principal de ML
-│   ├── data.py                  # Carrega XLSX, padroniza colunas e cria pares t→t+1
-│   ├── preprocessing.py         # Limpeza, codificação e escalonamento de dados
-│   ├── feature_engineering.py   # Criação e seleção de atributos
-│   ├── train.py                 # Treinamento do modelo e validação interna
-│   ├── evaluate.py              # Métricas, matriz de confusão e seleção de threshold
-│   ├── drift.py                 # Detecção de drift com Evidently
-│   └── utils.py                 # Utilitários compartilhados (logging, configs, helpers)
-│
+├── src/
 ├── dashboards/
-│   └── streamlit_app.py         # Dashboard Streamlit para visualizar relatórios de drift
-│
-├── tests/                       # Testes unitários e de integração (pytest)
-│   ├── test_data.py             # Testes da carga de dados e pareamento temporal
-│   ├── test_preprocessing.py    # Testes das etapas de pré-processamento
-│   ├── test_feature_engineering.py
-│   ├── test_train_smoke.py      # Smoke test da pipeline de treinamento
-│   └── test_api_predict.py      # Testes do endpoint da API (/predict)
-│
-├── notebooks/                   # (Opcional) Análises exploratórias e experimentos
-│
-├── Dockerfile                   # Definição da imagem Docker para deploy da API
-├── requirements.txt             # Dependências Python
-├── README.md                    # Documentação do projeto
-└── .gitignore                   # Regras de arquivos ignorados no Git
+├── tests/
+├── docs/
+├── notebooks/
+├── artifacts/
+└── logs/
 ```
 
 ## Ambiente Local (.venv)
@@ -150,19 +126,19 @@ Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 Progresso geral (barra visual):
 `[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`28 de 95 tarefas concluídas (29.5%)`
+`29 de 95 tarefas concluídas (30.5%)`
 
 | Fase | Progresso |
 |---|---|
 | Fase 1 - Entendimento do Problema e Target | 11/11 |
-| Fase 2 - Organização do Projeto e Ambiente | 4/7 |
+| Fase 2 - Organização do Projeto e Ambiente | 5/7 |
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 2/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 0/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 0/17 |
 | Fase 6 - Artefatos, API e Deploy | 0/12 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 1/7 |
 | Fase 8 - Documentação e Entrega Final | 10/15 |
-| Total | 28/95 |
+| Total | 29/95 |
 
 ### Fase 1 - Entendimento do Problema e Target [11/11]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
@@ -177,10 +153,10 @@ Progresso geral (barra visual):
 - [x] Definir holdout final: `X(2023) -> y(2024)`
 - [x] Garantir que `RA` seja usado apenas como ID, nunca como feature
 
-### Fase 2 - Organização do Projeto e Ambiente [4/7]
+### Fase 2 - Organização do Projeto e Ambiente [5/7]
 - [x] Configurar `.gitignore` inicial (ignorar `agents.md`, `dataset/` e `.DS_Store`)
 - [x] Expandir `.gitignore` com padrões essenciais de Python/MLOps (cache, venv, cobertura, builds, logs e segredos locais)
-- [ ] Criar estrutura de diretórios do projeto
+- [x] Criar estrutura de diretórios do projeto
 - [x] Criar `requirements.txt` com dependências mínimas
 - [x] Fixar versões das dependências para garantir reprodutibilidade do ambiente de execução
 - [ ] Definir `random_state` global para reprodutibilidade

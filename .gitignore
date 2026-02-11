@@ -32,6 +32,12 @@ htmlcov/
 
 # Logs
 *.log
+logs/*
+!logs/.gitkeep
+
+# Artefatos de execução/modelo
+artifacts/*
+!artifacts/.gitkeep
 
 # Build/distribuicao
 build/
