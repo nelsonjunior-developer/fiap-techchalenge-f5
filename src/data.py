@@ -5,11 +5,24 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Mapping
+from typing import Any, Mapping
 
 import pandas as pd
+from src.categories import (
+    normalize_categories_all,
+    persist_category_normalization_report,
+)
 from src.dtypes import standardize_dtypes_all
-from src.schema import align_years, harmonize_schema_year, normalize_headers
+from src.features import (
+    get_feature_columns,
+    persist_feature_split_report,
+    split_numeric_categorical_datetime,
+)
+from src.schema import (
+    align_years_with_metadata,
+    harmonize_schema_year,
+    normalize_headers,
+)
 from src.utils import get_logger
 
 _logger = get_logger(__name__)
@@ -97,7 +110,10 @@ def load_pede_workbook_raw(path: str | Path) -> dict[int, pd.DataFrame]:
 
 
 def standardize_columns(df: pd.DataFrame, year: int) -> pd.DataFrame:
-    """Compatibility wrapper delegating schema harmonization for one year."""
+    """Compatibility wrapper delegating schema harmonization for one year.
+
+    Maintains explicit failure when no Defas/Defasagem candidate exists.
+    """
     normalized = normalize_headers(df)
 
     candidates: list[tuple[int, str]] = []
@@ -112,26 +128,7 @@ def standardize_columns(df: pd.DataFrame, year: int) -> pd.DataFrame:
             f"Colunas disponíveis: {list(normalized.columns)}"
         )
 
-    preferred_candidates = [item for item in candidates if item[1] == "defasagem"]
-    chosen_idx = preferred_candidates[0][0] if preferred_candidates else candidates[0][0]
-    merged_defasagem = normalized.iloc[:, chosen_idx].copy()
-    for idx, _ in candidates:
-        if idx == chosen_idx:
-            continue
-        merged_defasagem = merged_defasagem.where(
-            merged_defasagem.notna(), normalized.iloc[:, idx]
-        )
-
-    harmonized = harmonize_schema_year(normalized, year=year, logger=_logger)
-    harmonized["Defasagem"] = merged_defasagem.values
-
-    drop_defas_dups = [
-        col for col in harmonized.columns if str(col).startswith("Defasagem__dup")
-    ]
-    if drop_defas_dups:
-        harmonized = harmonized.drop(columns=drop_defas_dups)
-
-    return harmonized
+    return harmonize_schema_year(normalized, year=year, logger=_logger)
 
 
 def load_year_sheet(
@@ -173,6 +170,20 @@ def load_pede_workbook(
     **read_excel_kwargs: object,
 ) -> dict[int, pd.DataFrame]:
     """Compatibility wrapper: load workbook raw then harmonize/align yearly schemas."""
+    typed_datasets, _, _ = load_pede_workbook_with_metadata(
+        file_path=file_path,
+        sheets_by_year=sheets_by_year,
+        **read_excel_kwargs,
+    )
+    return typed_datasets
+
+
+def load_pede_workbook_with_metadata(
+    file_path: str | Path,
+    sheets_by_year: Mapping[int, str] | None = None,
+    **read_excel_kwargs: object,
+) -> tuple[dict[int, pd.DataFrame], dict[str, Any], dict[int, dict[str, Any]]]:
+    """Load workbook and return typed yearly frames with schema/coercion metadata."""
     resolved_mapping = dict(sheets_by_year or YEAR_TO_SHEET)
     path_obj = _ensure_dataset_exists(file_path)
 
@@ -192,9 +203,30 @@ def load_pede_workbook(
     standardized: dict[int, pd.DataFrame] = {}
     for year, df in raw_datasets.items():
         standardized[year] = standardize_columns(df, year=year)
-    aligned = align_years(standardized, years=tuple(sorted(standardized)), logger=_logger)
-    typed_datasets, _ = standardize_dtypes_all(aligned, logger=_logger)
-    return typed_datasets
+    aligned, align_metadata = align_years_with_metadata(
+        standardized,
+        years=tuple(sorted(standardized)),
+        logger=_logger,
+    )
+    typed_datasets, coercion_report = standardize_dtypes_all(aligned, logger=_logger)
+    categorized_datasets, category_report = normalize_categories_all(
+        typed_datasets, logger=_logger
+    )
+    align_metadata["category_report"] = category_report
+    # Local import avoids circular dependency with src.cohort_stats CLI entrypoint.
+    from src.cohort_stats import compute_intersections, compute_ra_sets
+
+    ra_sets, invalid_counts = compute_ra_sets(categorized_datasets)
+    align_metadata["cohort_stats"] = compute_intersections(
+        ra_sets=ra_sets,
+        invalid_counts=invalid_counts,
+    )
+    persist_category_normalization_report(
+        category_report,
+        output_dir="artifacts",
+        write_markdown=False,
+    )
+    return categorized_datasets, align_metadata, coercion_report
 
 
 def make_target(defasagem_next: pd.Series) -> pd.Series:
@@ -224,6 +256,8 @@ def make_temporal_pairs(
     df_t1: pd.DataFrame,
     year_t: int,
     year_t1: int,
+    persist_feature_split: bool = False,
+    feature_split_report_path: str | Path = "artifacts/feature_split_report.json",
 ) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
     """Create temporal pairs X(t) -> y(t+1) with inner cohort by RA."""
     required_cols_t = {"RA"}
@@ -278,7 +312,17 @@ def make_temporal_pairs(
     ids.name = "RA"
 
     y = make_target(numeric_target.loc[valid_mask])
-    X = filtered.loc[:, feature_cols_t].copy()
+    X_raw = filtered.loc[:, feature_cols_t].copy()
+    feature_cols = get_feature_columns(X_raw)
+    numeric_cols, categorical_cols, datetime_cols, feature_split_report = (
+        split_numeric_categorical_datetime(X_raw, feature_cols)
+    )
+    feature_split_report["year_t"] = year_t
+    feature_split_report["year_t1"] = year_t1
+    X = X_raw.loc[:, feature_cols].copy()
+    X.attrs["feature_split"] = feature_split_report
+    if persist_feature_split:
+        persist_feature_split_report(feature_split_report, path=feature_split_report_path)
 
     if "RA" in X.columns:
         raise ValueError(f"RA não pode estar presente em X como feature em {year_t}->{year_t1}.")
@@ -286,8 +330,11 @@ def make_temporal_pairs(
         raise ValueError(
             f"X contém coluna futura do target em {year_t}->{year_t1}: {next_target_col}"
         )
-    if list(X.columns) != feature_cols_t:
-        raise ValueError(f"X não preservou apenas colunas de year_t em {year_t}->{year_t1}.")
+    if not set(X.columns).issubset(set(feature_cols_t)):
+        unexpected = sorted(set(X.columns) - set(feature_cols_t))
+        raise ValueError(
+            f"X contém colunas fora de year_t em {year_t}->{year_t1}: {unexpected}"
+        )
     leaked_t1_only_cols = [col for col in X.columns if col in df_t1.columns and col not in df_t.columns]
     if leaked_t1_only_cols:
         raise ValueError(
@@ -309,6 +356,19 @@ def make_temporal_pairs(
         raise ValueError(f"Target inválido; valores encontrados: {sorted(unique_target_values)}")
 
     prevalence = float(y.mean()) if len(y) else 0.0
+    _logger.info(
+        "Feature split %s->%s | total_features=%d selected=%d excluded=%d "
+        "numeric=%d categorical=%d datetime=%d all_missing=%d",
+        year_t,
+        year_t1,
+        len(feature_cols_t),
+        len(feature_cols),
+        len(feature_split_report["excluded_cols"]),
+        len(numeric_cols),
+        len(categorical_cols),
+        len(datetime_cols),
+        feature_split_report["n_all_missing_cols_no_recorte"],
+    )
     _logger.info(
         "Temporal pairs %s->%s | total_cohort=%d valid=%d excluded_missing=%d "
         "excluded_invalid=%d prevalence=%.4f",

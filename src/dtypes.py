@@ -20,13 +20,15 @@ _logger = get_logger(__name__)
 _DUP_COL_RE = re.compile(r"__dup\d+$")
 _NUMERIC_TEXT_RE = re.compile(r"^[+-]?\d+(?:[\.,]\d+)?$")
 _YEAR_FIRST_DATE_RE = re.compile(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}")
+_AGE_NUMBER_RE = re.compile(r"(\d{1,3})(?:[.,]\d+)?")
 
 _INVALID_NUMERIC_TOKENS = {"INCLUIR"}
+_INVALID_AGE_TOKENS = {"INCLUIR", "ALFA", "#N/A", "#DIV/0!", "N/A"}
+_INVALID_AGE_TOKENS_CASEFOLD = {token.casefold() for token in _INVALID_AGE_TOKENS}
 
 _INTEGER_BASE_COLUMNS = {
     "Ano ingresso",
     "Nº Av",
-    "Fase",
     "Defasagem",
     "Idade",
 }
@@ -51,6 +53,11 @@ _FLOAT_BASE_COLUMNS = {
     "Cf",
     "Ct",
     "Rec Psicologia",
+}
+
+_FORCE_STRING_COLUMNS = {
+    "Fase",
+    "Fase_Ideal",
 }
 
 
@@ -165,31 +172,124 @@ def _parse_datetime_text(text: str) -> pd.Timestamp | pd.NaT:
     return pd.to_datetime(normalized, errors="coerce", dayfirst=True)
 
 
-def _coerce_idade_series(series: pd.Series) -> tuple[pd.Series, dict[str, int]]:
-    cleaned = _normalize_blank_strings(series)
+def _recover_age_from_datetime(value: object, *, year: int | None) -> int | None:
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        return None
+
+    # In 2023, age came partially serialized as Excel dates (1900-01-DD).
+    # Recovering day-of-month avoids large information loss for this specific year.
+    if (
+        year == 2023
+        and parsed.year == 1900
+        and parsed.month == 1
+        and parsed.hour == 0
+        and parsed.minute == 0
+        and parsed.second == 0
+    ):
+        return int(parsed.day)
+    return None
+
+
+def parse_age_series(
+    series: pd.Series,
+    *,
+    year: int | None = None,
+) -> tuple[pd.Series, dict[str, int]]:
+    """Parse age values robustly while preserving missingness semantics."""
+    original = series.copy()
+    normalized = _normalize_blank_strings(original)
+
+    parsed = pd.Series(pd.NA, index=series.index, dtype="Int64")
     report = {
+        "n_original_non_null": int(original.notna().sum()),
+        "n_parsed_numeric_ok": 0,
+        "n_invalid_datetime_like": 0,
+        "n_invalid_tokens": 0,
+        "n_out_of_range": 0,
+        "n_recovered_excel_date": 0,
+        "n_final_na": 0,
+        "n_coerced_to_na": 0,
+        "n_invalid_tokens_replaced": 0,
+        # Backward-compatible aliases for previous report keys.
         "datetime_object_to_nan": 0,
         "datetime_string_to_nan": 0,
         "non_numeric_to_nan": 0,
         "fractional_to_nan": 0,
     }
 
-    datetime_obj_mask = cleaned.map(_is_datetime_scalar)
-    report["datetime_object_to_nan"] = int(datetime_obj_mask.sum())
-    cleaned = cleaned.mask(datetime_obj_mask, pd.NA)
+    for idx, value in normalized.items():
+        if pd.isna(value):
+            continue
 
-    datetime_str_mask = cleaned.map(_is_datetime_like_string)
-    report["datetime_string_to_nan"] = int(datetime_str_mask.sum())
-    cleaned = cleaned.mask(datetime_str_mask, pd.NA)
+        age_value: int | None = None
 
-    numeric = pd.to_numeric(cleaned, errors="coerce")
-    report["non_numeric_to_nan"] = int((cleaned.notna() & numeric.isna()).sum())
+        if _is_datetime_scalar(value):
+            recovered = _recover_age_from_datetime(value, year=year)
+            if recovered is not None:
+                age_value = recovered
+                report["n_recovered_excel_date"] += 1
+            else:
+                report["n_invalid_datetime_like"] += 1
+                report["datetime_object_to_nan"] += 1
+        elif isinstance(value, str):
+            text = value.strip()
+            if text == "":
+                report["n_invalid_tokens"] += 1
+                report["non_numeric_to_nan"] += 1
+                continue
 
-    fractional_mask = numeric.notna() & (numeric % 1 != 0)
-    report["fractional_to_nan"] = int(fractional_mask.sum())
-    numeric = numeric.mask(fractional_mask, pd.NA)
+            if text.casefold() in _INVALID_AGE_TOKENS_CASEFOLD:
+                report["n_invalid_tokens"] += 1
+                report["n_invalid_tokens_replaced"] += 1
+                report["non_numeric_to_nan"] += 1
+                continue
 
-    return numeric.astype("Int64"), report
+            parsed_dt = pd.to_datetime(text, errors="coerce")
+            if pd.notna(parsed_dt):
+                recovered = _recover_age_from_datetime(parsed_dt, year=year)
+                if recovered is not None:
+                    age_value = recovered
+                    report["n_recovered_excel_date"] += 1
+                else:
+                    report["n_invalid_datetime_like"] += 1
+                    report["datetime_string_to_nan"] += 1
+                    continue
+            else:
+                match = _AGE_NUMBER_RE.search(text)
+                if not match:
+                    report["n_invalid_tokens"] += 1
+                    report["non_numeric_to_nan"] += 1
+                    continue
+                age_value = int(match.group(1))
+        elif isinstance(value, (int, float)) and not isinstance(value, bool):
+            numeric_value = float(value)
+            rounded = round(numeric_value)
+            if abs(numeric_value - rounded) <= 1e-9:
+                age_value = int(rounded)
+            else:
+                report["fractional_to_nan"] += 1
+                continue
+        else:
+            report["n_invalid_tokens"] += 1
+            report["non_numeric_to_nan"] += 1
+            continue
+
+        if age_value is None:
+            continue
+
+        report["n_parsed_numeric_ok"] += 1
+        if age_value < 3 or age_value > 30:
+            report["n_out_of_range"] += 1
+            continue
+
+        parsed.loc[idx] = age_value
+
+    non_null_original_mask = normalized.notna()
+    final_na_non_null = int(parsed[non_null_original_mask].isna().sum())
+    report["n_final_na"] = int(parsed.isna().sum())
+    report["n_coerced_to_na"] = final_na_non_null
+    return parsed.astype("Int64"), report
 
 
 def _coerce_numeric_series(
@@ -197,6 +297,7 @@ def _coerce_numeric_series(
     *,
     as_integer: bool,
 ) -> tuple[pd.Series, dict[str, int]]:
+    original_non_null = int(series.notna().sum())
     cleaned = _normalize_blank_strings(series)
 
     token_mask = cleaned.map(
@@ -217,6 +318,7 @@ def _coerce_numeric_series(
         standardized = numeric.astype("Float64")
 
     return standardized, {
+        "n_original_non_null": original_non_null,
         "invalid_tokens_replaced": invalid_tokens_replaced,
         "coerced_to_nan": coerced_to_nan,
     }
@@ -238,6 +340,7 @@ def standardize_dtypes(
         "year": year,
         "coercions": {},
         "invalid_tokens_replaced": {},
+        "numeric_columns": {},
         "n_nat_data_nasc": 0,
         "data_nasc_sources": {
             "year": 0,
@@ -246,6 +349,15 @@ def standardize_dtypes(
             "datetime": 0,
         },
         "idade": {
+            "n_original_non_null": 0,
+            "n_parsed_numeric_ok": 0,
+            "n_invalid_datetime_like": 0,
+            "n_invalid_tokens": 0,
+            "n_out_of_range": 0,
+            "n_recovered_excel_date": 0,
+            "n_final_na": 0,
+            "n_coerced_to_na": 0,
+            "n_invalid_tokens_replaced": 0,
             "datetime_object_to_nan": 0,
             "datetime_string_to_nan": 0,
             "non_numeric_to_nan": 0,
@@ -272,11 +384,20 @@ def standardize_dtypes(
             continue
 
         if base_column == "Idade":
-            converted_idade, idade_report = _coerce_idade_series(standardized[column])
+            converted_idade, idade_report = parse_age_series(
+                standardized[column], year=year
+            )
             standardized[column] = converted_idade
             report["idade"] = {
                 key: report["idade"][key] + idade_report[key]
                 for key in report["idade"]
+            }
+            report["coercions"][column] = idade_report["n_coerced_to_na"]
+            report["numeric_columns"][column] = {
+                "n_original_non_null": idade_report["n_original_non_null"],
+                "n_coerced_to_na": idade_report["n_coerced_to_na"],
+                "n_invalid_tokens_replaced": idade_report["n_invalid_tokens_replaced"],
+                "dtype_final": str(converted_idade.dtype),
             }
             continue
 
@@ -291,6 +412,12 @@ def standardize_dtypes(
                 report["invalid_tokens_replaced"][column] = numeric_report[
                     "invalid_tokens_replaced"
                 ]
+            report["numeric_columns"][column] = {
+                "n_original_non_null": numeric_report["n_original_non_null"],
+                "n_coerced_to_na": numeric_report["coerced_to_nan"],
+                "n_invalid_tokens_replaced": numeric_report["invalid_tokens_replaced"],
+                "dtype_final": str(converted.dtype),
+            }
             continue
 
         if base_column in _FLOAT_BASE_COLUMNS:
@@ -304,10 +431,19 @@ def standardize_dtypes(
                 report["invalid_tokens_replaced"][column] = numeric_report[
                     "invalid_tokens_replaced"
                 ]
+            report["numeric_columns"][column] = {
+                "n_original_non_null": numeric_report["n_original_non_null"],
+                "n_coerced_to_na": numeric_report["coerced_to_nan"],
+                "n_invalid_tokens_replaced": numeric_report["invalid_tokens_replaced"],
+                "dtype_final": str(converted.dtype),
+            }
             continue
 
     for column in list(standardized.columns):
         base_column = _base_column_name(column)
+        if base_column in _FORCE_STRING_COLUMNS:
+            standardized[column] = _to_clean_string(standardized[column])
+            continue
         if base_column in _INTEGER_BASE_COLUMNS | _FLOAT_BASE_COLUMNS | {"Data_Nasc", "RA"}:
             continue
         if pd.api.types.is_datetime64_any_dtype(standardized[column]):
@@ -344,16 +480,24 @@ def standardize_dtypes(
 
     log.info(
         "Dtype standardization year=%d | nat_data_nasc=%d data_nasc_year=%d "
-        "data_nasc_excel_serial=%d data_nasc_string=%d idade_datetime_obj_to_nan=%d "
-        "idade_datetime_str_to_nan=%d invalid_tokens_top=%s top_coercions=%s "
+        "data_nasc_excel_serial=%d data_nasc_string=%d idade_original_non_null=%d "
+        "idade_parsed_ok=%d idade_recovered_excel_date=%d idade_invalid_datetime_like=%d "
+        "idade_invalid_tokens=%d idade_out_of_range=%d idade_final_na=%d "
+        "idade_coerced_to_na=%d invalid_tokens_top=%s top_coercions=%s "
         "dtype_counts=int:%d float:%d string:%d datetime:%d",
         year,
         report["n_nat_data_nasc"],
         report["data_nasc_sources"]["year"],
         report["data_nasc_sources"]["excel_serial"],
         report["data_nasc_sources"]["string"],
-        report["idade"]["datetime_object_to_nan"],
-        report["idade"]["datetime_string_to_nan"],
+        report["idade"]["n_original_non_null"],
+        report["idade"]["n_parsed_numeric_ok"],
+        report["idade"]["n_recovered_excel_date"],
+        report["idade"]["n_invalid_datetime_like"],
+        report["idade"]["n_invalid_tokens"],
+        report["idade"]["n_out_of_range"],
+        report["idade"]["n_final_na"],
+        report["idade"]["n_coerced_to_na"],
         top_invalid_tokens,
         top_coercions,
         dtype_counts["int"],

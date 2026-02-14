@@ -1,0 +1,2337 @@
+{
+  "year": 2022,
+  "columns": {
+    "Ano ingresso": {
+      "name": "Ano ingresso",
+      "dtype": "Int64",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "Int64"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "error",
+          "spec": {
+            "allow_missing": false
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "error",
+          "spec": {
+            "kind": "range",
+            "min": 2010,
+            "max": 2030,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Atingiu PV": {
+      "name": "Atingiu PV",
+      "dtype": "string",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "error",
+          "spec": {
+            "allow_missing": false
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "warning",
+          "spec": {
+            "kind": "set",
+            "min": null,
+            "max": null,
+            "allowed": [
+              "Sim",
+              "Não"
+            ],
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Ativo/ Inativo": {
+      "name": "Ativo/ Inativo",
+      "dtype": "string",
+      "presence": "structural_optional",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": "Coluna estrutural do alinhamento entre anos."
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "info",
+          "spec": {
+            "kind": "none",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": "Coluna estrutural opcional no ano."
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Ativo/ Inativo__dup1": {
+      "name": "Ativo/ Inativo__dup1",
+      "dtype": "string",
+      "presence": "structural_optional",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": "Coluna estrutural do alinhamento entre anos."
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "info",
+          "spec": {
+            "kind": "none",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": "Coluna estrutural opcional no ano."
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Avaliador1": {
+      "name": "Avaliador1",
+      "dtype": "string",
+      "presence": "original",
+      "pii": true,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "info",
+          "spec": {
+            "kind": "none",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Avaliador2": {
+      "name": "Avaliador2",
+      "dtype": "string",
+      "presence": "original",
+      "pii": true,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "info",
+          "spec": {
+            "kind": "none",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Avaliador3": {
+      "name": "Avaliador3",
+      "dtype": "string",
+      "presence": "original",
+      "pii": true,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "info",
+          "spec": {
+            "kind": "none",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Avaliador4": {
+      "name": "Avaliador4",
+      "dtype": "string",
+      "presence": "original",
+      "pii": true,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "info",
+          "spec": {
+            "kind": "none",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Avaliador5": {
+      "name": "Avaliador5",
+      "dtype": "string",
+      "presence": "structural_optional",
+      "pii": true,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": "Coluna estrutural do alinhamento entre anos."
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "info",
+          "spec": {
+            "kind": "none",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": "Coluna estrutural opcional no ano."
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Avaliador6": {
+      "name": "Avaliador6",
+      "dtype": "string",
+      "presence": "structural_optional",
+      "pii": true,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": "Coluna estrutural do alinhamento entre anos."
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "info",
+          "spec": {
+            "kind": "none",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": "Coluna estrutural opcional no ano."
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Cf": {
+      "name": "Cf",
+      "dtype": "Float64",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "Float64"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "error",
+          "spec": {
+            "allow_missing": false
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "warning",
+          "spec": {
+            "kind": "range",
+            "min": 0,
+            "max": 300,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": "Semântica muda por ano; ajustar com evidência de negócio."
+        }
+      ],
+      "description": null
+    },
+    "Cg": {
+      "name": "Cg",
+      "dtype": "Float64",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "Float64"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "error",
+          "spec": {
+            "allow_missing": false
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "warning",
+          "spec": {
+            "kind": "range",
+            "min": 0,
+            "max": 1000,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": "Semântica muda por ano; ajustar com evidência de negócio."
+        }
+      ],
+      "description": null
+    },
+    "Ct": {
+      "name": "Ct",
+      "dtype": "Float64",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "Float64"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "error",
+          "spec": {
+            "allow_missing": false
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "warning",
+          "spec": {
+            "kind": "range",
+            "min": 0,
+            "max": 50,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": "Semântica muda por ano; ajustar com evidência de negócio."
+        }
+      ],
+      "description": null
+    },
+    "Data_Nasc": {
+      "name": "Data_Nasc",
+      "dtype": "datetime64[ns]",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "datetime64[ns]"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "warning",
+          "spec": {
+            "allow_missing": false
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "warning",
+          "spec": {
+            "kind": "date_range",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": "1990-01-01",
+            "end": "2030-12-31",
+            "notes": "Faixa plausível para data de nascimento após padronização."
+          },
+          "notes": null
+        }
+      ],
+      "description": "Data de nascimento padronizada."
+    },
+    "Defasagem": {
+      "name": "Defasagem",
+      "dtype": "Int64",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "Int64"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "error",
+          "spec": {
+            "allow_missing": false
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "error",
+          "spec": {
+            "kind": "range",
+            "min": -10,
+            "max": 10,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": "Indicador de defasagem escolar."
+    },
+    "Destaque IDA": {
+      "name": "Destaque IDA",
+      "dtype": "string",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "info",
+          "spec": {
+            "kind": "none",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Destaque IEG": {
+      "name": "Destaque IEG",
+      "dtype": "string",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "info",
+          "spec": {
+            "kind": "none",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Destaque IPV": {
+      "name": "Destaque IPV",
+      "dtype": "string",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "info",
+          "spec": {
+            "kind": "none",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Destaque IPV__dup1": {
+      "name": "Destaque IPV__dup1",
+      "dtype": "string",
+      "presence": "structural_optional",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": "Coluna estrutural do alinhamento entre anos."
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "info",
+          "spec": {
+            "kind": "none",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": "Coluna estrutural opcional no ano."
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Escola": {
+      "name": "Escola",
+      "dtype": "string",
+      "presence": "structural_optional",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": "Coluna estrutural do alinhamento entre anos."
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "info",
+          "spec": {
+            "kind": "none",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": "Domínio aberto/alta cardinalidade; sem enumeração estrita."
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Fase": {
+      "name": "Fase",
+      "dtype": "string",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "warning",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "info",
+          "spec": {
+            "kind": "none",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": "Domínio aberto/alta cardinalidade; sem enumeração estrita."
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Fase_Ideal": {
+      "name": "Fase_Ideal",
+      "dtype": "string",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "warning",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "info",
+          "spec": {
+            "kind": "none",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": "Domínio aberto/alta cardinalidade; sem enumeração estrita."
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Gênero": {
+      "name": "Gênero",
+      "dtype": "string",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "error",
+          "spec": {
+            "allow_missing": false
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "error",
+          "spec": {
+            "kind": "set",
+            "min": null,
+            "max": null,
+            "allowed": [
+              "Feminino",
+              "Masculino"
+            ],
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "IAA": {
+      "name": "IAA",
+      "dtype": "Float64",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "Float64"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "warning",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "error",
+          "spec": {
+            "kind": "range",
+            "min": 0,
+            "max": 10.5,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "IAN": {
+      "name": "IAN",
+      "dtype": "Float64",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "Float64"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "warning",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "error",
+          "spec": {
+            "kind": "range",
+            "min": 0,
+            "max": 10.5,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "IDA": {
+      "name": "IDA",
+      "dtype": "Float64",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "Float64"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "warning",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "error",
+          "spec": {
+            "kind": "range",
+            "min": 0,
+            "max": 10.5,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "IEG": {
+      "name": "IEG",
+      "dtype": "Float64",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "Float64"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "warning",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "error",
+          "spec": {
+            "kind": "range",
+            "min": 0,
+            "max": 10.5,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "INDE": {
+      "name": "INDE",
+      "dtype": "Float64",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "Float64"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "warning",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "error",
+          "spec": {
+            "kind": "range",
+            "min": 0,
+            "max": 10.5,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "INDE 2023": {
+      "name": "INDE 2023",
+      "dtype": "Float64",
+      "presence": "structural_optional",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "Float64"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": "Coluna estrutural do alinhamento entre anos."
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "error",
+          "spec": {
+            "kind": "range",
+            "min": 0,
+            "max": 10.5,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "INDE 2024": {
+      "name": "INDE 2024",
+      "dtype": "Float64",
+      "presence": "structural_optional",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "Float64"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": "Coluna estrutural do alinhamento entre anos."
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "error",
+          "spec": {
+            "kind": "range",
+            "min": 0,
+            "max": 10.5,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "INDE 22": {
+      "name": "INDE 22",
+      "dtype": "Float64",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "Float64"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "error",
+          "spec": {
+            "kind": "range",
+            "min": 0,
+            "max": 10.5,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "INDE 23": {
+      "name": "INDE 23",
+      "dtype": "Float64",
+      "presence": "structural_optional",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "Float64"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": "Coluna estrutural do alinhamento entre anos."
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "error",
+          "spec": {
+            "kind": "range",
+            "min": 0,
+            "max": 10.5,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "IPP": {
+      "name": "IPP",
+      "dtype": "Float64",
+      "presence": "structural_optional",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "Float64"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": "Coluna estrutural do alinhamento entre anos."
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "error",
+          "spec": {
+            "kind": "range",
+            "min": 0,
+            "max": 10.5,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "IPS": {
+      "name": "IPS",
+      "dtype": "Float64",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "Float64"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "warning",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "error",
+          "spec": {
+            "kind": "range",
+            "min": 0,
+            "max": 10.5,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "IPV": {
+      "name": "IPV",
+      "dtype": "Float64",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "Float64"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "warning",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "error",
+          "spec": {
+            "kind": "range",
+            "min": 0,
+            "max": 10.5,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Idade": {
+      "name": "Idade",
+      "dtype": "Int64",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "Int64"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "error",
+          "spec": {
+            "allow_missing": false
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "error",
+          "spec": {
+            "kind": "range",
+            "min": 3,
+            "max": 30,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Indicado": {
+      "name": "Indicado",
+      "dtype": "string",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "error",
+          "spec": {
+            "allow_missing": false
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "warning",
+          "spec": {
+            "kind": "set",
+            "min": null,
+            "max": null,
+            "allowed": [
+              "Sim",
+              "Não"
+            ],
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Ing": {
+      "name": "Ing",
+      "dtype": "Float64",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "Float64"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": "Missing historicamente alto nesta variável."
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "error",
+          "spec": {
+            "kind": "range",
+            "min": 0,
+            "max": 10.5,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Instituição de ensino": {
+      "name": "Instituição de ensino",
+      "dtype": "string",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "warning",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "info",
+          "spec": {
+            "kind": "none",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": "Domínio aberto/alta cardinalidade; sem enumeração estrita."
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Mat": {
+      "name": "Mat",
+      "dtype": "Float64",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "Float64"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "warning",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "error",
+          "spec": {
+            "kind": "range",
+            "min": 0,
+            "max": 10.5,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Nome_Anon": {
+      "name": "Nome_Anon",
+      "dtype": "string",
+      "presence": "original",
+      "pii": true,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "info",
+          "spec": {
+            "kind": "none",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": "Campo sensível; em 2022 pode não estar totalmente anonimizado."
+    },
+    "Nº Av": {
+      "name": "Nº Av",
+      "dtype": "Int64",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "Int64"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "error",
+          "spec": {
+            "allow_missing": false
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "error",
+          "spec": {
+            "kind": "range",
+            "min": 0,
+            "max": 10,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Pedra 20": {
+      "name": "Pedra 20",
+      "dtype": "string",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "warning",
+          "spec": {
+            "kind": "set",
+            "min": null,
+            "max": null,
+            "allowed": [
+              "Ametista",
+              "Ágata",
+              "Quartzo",
+              "Topázio"
+            ],
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": "Missing permitido; tokens inválidos devem virar NA."
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Pedra 2023": {
+      "name": "Pedra 2023",
+      "dtype": "string",
+      "presence": "structural_optional",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": "Coluna estrutural do alinhamento entre anos."
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "warning",
+          "spec": {
+            "kind": "set",
+            "min": null,
+            "max": null,
+            "allowed": [
+              "Ametista",
+              "Ágata",
+              "Quartzo",
+              "Topázio"
+            ],
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": "Missing permitido; tokens inválidos devem virar NA."
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Pedra 2024": {
+      "name": "Pedra 2024",
+      "dtype": "string",
+      "presence": "structural_optional",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": "Coluna estrutural do alinhamento entre anos."
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "warning",
+          "spec": {
+            "kind": "set",
+            "min": null,
+            "max": null,
+            "allowed": [
+              "Ametista",
+              "Ágata",
+              "Quartzo",
+              "Topázio"
+            ],
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": "Missing permitido; tokens inválidos devem virar NA."
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Pedra 21": {
+      "name": "Pedra 21",
+      "dtype": "string",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "warning",
+          "spec": {
+            "kind": "set",
+            "min": null,
+            "max": null,
+            "allowed": [
+              "Ametista",
+              "Ágata",
+              "Quartzo",
+              "Topázio"
+            ],
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": "Missing permitido; tokens inválidos devem virar NA."
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Pedra 22": {
+      "name": "Pedra 22",
+      "dtype": "string",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "warning",
+          "spec": {
+            "kind": "set",
+            "min": null,
+            "max": null,
+            "allowed": [
+              "Ametista",
+              "Ágata",
+              "Quartzo",
+              "Topázio"
+            ],
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": "Missing permitido; tokens inválidos devem virar NA."
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Pedra 23": {
+      "name": "Pedra 23",
+      "dtype": "string",
+      "presence": "structural_optional",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": "Coluna estrutural do alinhamento entre anos."
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "warning",
+          "spec": {
+            "kind": "set",
+            "min": null,
+            "max": null,
+            "allowed": [
+              "Ametista",
+              "Ágata",
+              "Quartzo",
+              "Topázio"
+            ],
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": "Missing permitido; tokens inválidos devem virar NA."
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Pedra_Ano": {
+      "name": "Pedra_Ano",
+      "dtype": "string",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "warning",
+          "spec": {
+            "kind": "set",
+            "min": null,
+            "max": null,
+            "allowed": [
+              "Ametista",
+              "Ágata",
+              "Quartzo",
+              "Topázio"
+            ],
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": "Missing permitido; tokens inválidos devem virar NA."
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Por": {
+      "name": "Por",
+      "dtype": "Float64",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "Float64"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "warning",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "error",
+          "spec": {
+            "kind": "range",
+            "min": 0,
+            "max": 10.5,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "RA": {
+      "name": "RA",
+      "dtype": "string",
+      "presence": "original",
+      "pii": true,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "error",
+          "spec": {
+            "allow_missing": false
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "info",
+          "spec": {
+            "kind": "none",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": "Identificador operacional; não usar como feature."
+          },
+          "notes": null
+        }
+      ],
+      "description": "Identificador do estudante (somente chave/auditoria)."
+    },
+    "Rec Av1": {
+      "name": "Rec Av1",
+      "dtype": "string",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "info",
+          "spec": {
+            "kind": "none",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Rec Av2": {
+      "name": "Rec Av2",
+      "dtype": "string",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "info",
+          "spec": {
+            "kind": "none",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Rec Av3": {
+      "name": "Rec Av3",
+      "dtype": "string",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "info",
+          "spec": {
+            "kind": "none",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Rec Av4": {
+      "name": "Rec Av4",
+      "dtype": "string",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "info",
+          "spec": {
+            "kind": "none",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Rec Psicologia": {
+      "name": "Rec Psicologia",
+      "dtype": "Float64",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "Float64"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "info",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "info",
+          "spec": {
+            "kind": "none",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": null
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    },
+    "Turma": {
+      "name": "Turma",
+      "dtype": "string",
+      "presence": "original",
+      "pii": false,
+      "rules": [
+        {
+          "rule_type": "dtype",
+          "enforcement": "error",
+          "spec": {
+            "expected_dtype": "string"
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "missing",
+          "enforcement": "warning",
+          "spec": {
+            "allow_missing": true
+          },
+          "notes": null
+        },
+        {
+          "rule_type": "domain",
+          "enforcement": "info",
+          "spec": {
+            "kind": "none",
+            "min": null,
+            "max": null,
+            "allowed": null,
+            "pattern": null,
+            "start": null,
+            "end": null,
+            "notes": "Domínio aberto/alta cardinalidade; sem enumeração estrita."
+          },
+          "notes": null
+        }
+      ],
+      "description": null
+    }
+  },
+  "metadata": {
+    "contract_version": "1.0.0",
+    "rows_expected": 860,
+    "dataset_basename": "BASE DE DADOS PEDE 2024 - DATATHON.xlsx",
+    "dataset_sha256": null,
+    "generated_at": "2026-02-14T18:38:49.861268+00:00",
+    "notes": "Presence diferencia colunas originais do ano e colunas estruturais do alinhamento."
+  }
+}

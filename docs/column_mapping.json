@@ -1,0 +1,42 @@
+{
+  "Defasagem": {
+    "2022": ["Defasagem", "Defasagem__dup1", "Defasagem.1", "Defas"],
+    "2023": ["Defasagem", "Defasagem__dup1", "Defasagem.1", "Defas"],
+    "2024": ["Defasagem", "Defasagem__dup1", "Defasagem.1", "Defas"]
+  },
+  "Mat": {
+    "2022": ["Matem", "Mat"],
+    "2023": ["Mat"],
+    "2024": ["Mat"]
+  },
+  "Por": {
+    "2022": ["Portug", "Por"],
+    "2023": ["Por"],
+    "2024": ["Por"]
+  },
+  "Ing": {
+    "2022": ["Inglês", "Ing"],
+    "2023": ["Ing"],
+    "2024": ["Ing"]
+  },
+  "Data_Nasc": {
+    "2022": ["Ano nasc", "Data_Nasc"],
+    "2023": ["Data de Nasc", "Data_Nasc"],
+    "2024": ["Data de Nasc", "Data_Nasc"]
+  },
+  "Fase_Ideal": {
+    "2022": ["Fase ideal", "Fase_Ideal"],
+    "2023": ["Fase Ideal", "Fase_Ideal"],
+    "2024": ["Fase Ideal", "Fase_Ideal"]
+  },
+  "Nome_Anon": {
+    "2022": ["Nome", "Nome_Anon"],
+    "2023": ["Nome Anonimizado", "Nome_Anon"],
+    "2024": ["Nome Anonimizado", "Nome_Anon"]
+  },
+  "Idade": {
+    "2022": ["Idade 22", "Idade"],
+    "2023": ["Idade"],
+    "2024": ["Idade"]
+  }
+}

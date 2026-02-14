@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import re
-from typing import Mapping
+from typing import Any
 
 import pandas as pd
 
+from src.column_mapping import harmonize_year_columns
 from src.utils import get_logger
 
 _logger = get_logger(__name__)
@@ -79,52 +80,6 @@ def resolve_duplicate_headers(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str,
     return resolved, rename_map
 
 
-def build_canonical_rename_map(year: int) -> dict[str, str]:
-    """Return canonical header rename rules for known year schema differences."""
-    _validate_year(year)
-    return {
-        "Defas": "Defasagem",
-        "Ano nasc": "Data_Nasc",
-        "Data de Nasc": "Data_Nasc",
-        "Idade 22": "Idade",
-        "Fase ideal": "Fase_Ideal",
-        "Fase Ideal": "Fase_Ideal",
-        "Matem": "Mat",
-        "Portug": "Por",
-        "Inglês": "Ing",
-        "Nome": "Nome_Anon",
-        "Nome Anonimizado": "Nome_Anon",
-    }
-
-
-def _apply_canonical_renames(
-    df: pd.DataFrame, rename_map: Mapping[str, str]
-) -> tuple[pd.DataFrame, dict[str, str]]:
-    renamed = df.copy()
-    cols = [str(c) for c in renamed.columns]
-    used: set[str] = set()
-    new_cols: list[str] = []
-    applied: dict[str, str] = {}
-
-    for col in cols:
-        target = rename_map.get(col, col)
-        if target in used:
-            dup_idx = 1
-            candidate = f"{target}__dup{dup_idx}"
-            while candidate in used:
-                dup_idx += 1
-                candidate = f"{target}__dup{dup_idx}"
-            target = candidate
-
-        new_cols.append(target)
-        used.add(target)
-        if target != col:
-            applied[col] = target
-
-    renamed.columns = new_cols
-    return renamed, applied
-
-
 def select_with_fallback(
     df: pd.DataFrame, candidates: list[str]
 ) -> tuple[pd.Series | None, str | None]:
@@ -135,11 +90,11 @@ def select_with_fallback(
     return None, None
 
 
-def harmonize_schema_year(
+def harmonize_schema_year_with_report(
     df: pd.DataFrame,
     year: int,
     logger=None,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Harmonize one year schema and create canonical INDE and Pedra_Ano columns."""
     _validate_year(year)
     log = logger or _logger
@@ -147,8 +102,8 @@ def harmonize_schema_year(
     before_shape = df.shape
     normalized = normalize_headers(df)
     deduped, dup_rename_map = resolve_duplicate_headers(normalized)
-    canonical_map = build_canonical_rename_map(year)
-    harmonized, canonical_rename_map = _apply_canonical_renames(deduped, canonical_map)
+    mapped, mapping_report = harmonize_year_columns(deduped, year=year, strict=False)
+    harmonized = mapped.copy()
 
     inde_series, inde_source = select_with_fallback(harmonized, _INDE_CANDIDATES_BY_YEAR[year])
     if inde_series is None:
@@ -176,17 +131,29 @@ def harmonize_schema_year(
         }
     )
     log.info(
-        "Harmonize schema year=%d | shape_before=%s shape_after=%s canonical_renames=%d "
-        "duplicates_resolved=%d duplicate_bases=%s INDE_source=%s Pedra_Ano_source=%s",
+        "Harmonize schema year=%d | shape_before=%s shape_after=%s mapping_renames=%d "
+        "mapping_merges=%d duplicates_resolved=%d duplicate_bases=%s INDE_source=%s Pedra_Ano_source=%s",
         year,
         before_shape,
         harmonized.shape,
-        len(canonical_rename_map),
+        len(mapping_report["renamed"]),
+        len(mapping_report["merged"]),
         len(dup_rename_map),
         duplicate_base_names,
         inde_source,
         pedra_source,
     )
+    mapping_report["header_duplicates_renamed"] = dict(dup_rename_map)
+    return harmonized, mapping_report
+
+
+def harmonize_schema_year(
+    df: pd.DataFrame,
+    year: int,
+    logger=None,
+) -> pd.DataFrame:
+    """Backward-compatible wrapper returning only harmonized dataframe."""
+    harmonized, _ = harmonize_schema_year_with_report(df=df, year=year, logger=logger)
     return harmonized
 
 
@@ -195,13 +162,31 @@ def align_years(
     years: list[int] | tuple[int, ...] = (2022, 2023, 2024),
     logger=None,
 ) -> dict[int, pd.DataFrame]:
+    """Backward-compatible wrapper returning only aligned dataframes."""
+    aligned, _ = align_years_with_metadata(dfs=dfs, years=years, logger=logger)
+    return aligned
+
+
+def align_years_with_metadata(
+    dfs: dict[int, pd.DataFrame],
+    years: list[int] | tuple[int, ...] = (2022, 2023, 2024),
+    logger=None,
+) -> tuple[dict[int, pd.DataFrame], dict[str, Any]]:
     """Harmonize and align yearly DataFrames to the same canonical schema."""
     log = logger or _logger
     harmonized: dict[int, pd.DataFrame] = {}
+    original_columns: dict[int, set[str]] = {}
+    mapping_reports: dict[int, dict[str, Any]] = {}
     for year in years:
         if year not in dfs:
             raise ValueError(f"Ano {year} ausente no dicionário de entrada para align_years.")
-        harmonized[year] = harmonize_schema_year(dfs[year], year=year, logger=log)
+        harmonized_df, mapping_report = harmonize_schema_year_with_report(
+            dfs[year], year=year, logger=log
+        )
+        harmonized[year] = harmonized_df
+        mapping_reports[year] = mapping_report
+        # Preserve the pre-alignment schema to distinguish structural vs real missingness.
+        original_columns[year] = set(harmonized_df.columns)
 
     all_columns: set[str] = set()
     for df in harmonized.values():
@@ -229,5 +214,11 @@ def align_years(
         )
         aligned[year] = aligned_df
 
-    return aligned
-
+    schema_identical = len({tuple(df.columns) for df in aligned.values()}) <= 1
+    metadata = {
+        "original_columns": original_columns,
+        "aligned_columns": ordered_columns,
+        "schema_identical": schema_identical,
+        "column_mapping_report": mapping_reports,
+    }
+    return aligned, metadata

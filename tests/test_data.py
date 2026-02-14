@@ -261,3 +261,30 @@ def test_load_pede_workbook_wrapper_keeps_standardization_contract(tmp_path: Pat
         assert str(datasets[year]["RA"].dtype) == "string"
     assert str(datasets[2022]["INDE"].dtype) == "Float64"
     assert datasets[2022]["INDE"].isna().all()
+
+
+def test_load_pede_workbook_with_metadata_returns_schema_and_coercion_reports(
+    tmp_path: Path,
+) -> None:
+    workbook_path = _write_workbook(
+        tmp_path,
+        {
+            "PEDE2022": pd.DataFrame(
+                {"RA": [1], "Defas": [-1], "INDE 22": ["INCLUIR"], "Fase": ["A"]}
+            ),
+            "PEDE2023": pd.DataFrame({"RA": [1], "Defasagem": [0], "INDE 2023": [0.5]}),
+            "PEDE2024": pd.DataFrame({"RA": [1], "Defasagem": [1], "INDE 2024": [0.7]}),
+        },
+    )
+
+    datasets, metadata, coercion = data.load_pede_workbook_with_metadata(workbook_path)
+
+    assert set(datasets.keys()) == {2022, 2023, 2024}
+    assert metadata["schema_identical"] is True
+    assert "original_columns" in metadata
+    assert "category_report" in metadata
+    assert "cohort_stats" in metadata
+    assert "2022_2023" in metadata["cohort_stats"]["pairs"]
+    assert "Defasagem" in metadata["original_columns"][2022]
+    assert coercion[2022]["numeric_columns"]["INDE"]["n_invalid_tokens_replaced"] == 1
+    assert "Fase" not in coercion[2022]["numeric_columns"]
