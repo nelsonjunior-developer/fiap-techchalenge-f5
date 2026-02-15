@@ -206,6 +206,24 @@ def test_make_temporal_pairs_raises_on_unexpected_merge_columns(
     assert "extras=['Mat_y']" in str(error.value)
 
 
+def test_make_temporal_pairs_drops_all_missing_leakage_suspects() -> None:
+    df_t = pd.DataFrame(
+        {
+            "RA": [1, 2],
+            "Mat": [7.0, 8.0],
+            "INDE 2023": [pd.NA, pd.NA],
+        }
+    )
+    df_t1 = pd.DataFrame({"RA": [1, 2], "Defasagem": [-1, 0]})
+
+    X, y, _ = data.make_temporal_pairs(df_t, df_t1, year_t=2022, year_t1=2023)
+
+    assert "INDE 2023" not in X.columns
+    assert "INDE 2023" in X.attrs["feature_split"]["leakage_suspect_columns"]
+    assert "INDE 2023" in X.attrs["feature_split"]["leakage_dropped_all_missing"]
+    assert y.tolist() == [1, 0]
+
+
 def test_load_pede_workbook_raw_raises_file_not_found() -> None:
     with pytest.raises(FileNotFoundError, match="DATASET_PATH"):
         data.load_pede_workbook_raw("arquivo_inexistente.xlsx")

@@ -9,6 +9,7 @@ import pandas as pd
 
 from src.contracts import PII_COLUMNS
 from src.features import add_engineered_features, get_engineered_feature_names
+from src.leakage import detect_leakage_columns, assert_no_leakage
 from src.utils import get_logger
 
 NUMERIC_COLS: list[str] = [
@@ -157,13 +158,26 @@ def validate_inference_frame(
         raise ValueError(f"[{context}] Missing expected columns: {missing}")
 
     extras = sorted(observed_set - expected_set)
-    if extras and log_extras:
-        _logger.info(
-            "[%s] Extra columns received (ignored by preprocessor): count=%d cols=%s",
-            context,
-            len(extras),
-            extras,
+    if extras:
+        extras_df = X.loc[:, extras].copy()
+        leakage_report = detect_leakage_columns(
+            X=extras_df,
+            year_t=None,
+            year_t1=None,
+            include_year_specific=False,
         )
+        if leakage_report["n_suspect"] > 0:
+            suspects = ", ".join(leakage_report["suspect_columns"])
+            raise ValueError(
+                f"[{context}] Leakage-like extra columns detected in payload: {suspects}"
+            )
+        if log_extras:
+            _logger.info(
+                "[%s] Extra columns received (ignored by preprocessor): count=%d cols=%s",
+                context,
+                len(extras),
+                extras,
+            )
 
 
 def _build_ohe() -> Any:
@@ -330,7 +344,14 @@ def build_preprocessing_bundle(
                 f"[{context}] Missing model columns after feature engineering: "
                 f"{missing_model_cols}"
             )
-        return X_model.loc[:, expected_model_cols].copy(), feature_report
+        X_model = X_model.loc[:, expected_model_cols].copy()
+        assert_no_leakage(
+            X_model,
+            year_t=None,
+            year_t1=None,
+            include_year_specific=False,
+        )
+        return X_model, feature_report
 
     return {
         "expected_cols": expected_raw_cols,

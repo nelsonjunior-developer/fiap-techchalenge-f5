@@ -246,6 +246,7 @@ fiap-techchalenge-f5/
 │   ├── dtypes.py                 # padronização de tipos e auditoria de coerção
 │   ├── features.py               # seleção de features e split num/cat/datetime
 │   ├── imputation.py             # plano de imputação de missing para treino/inferência
+│   ├── leakage.py                # detecção/assert explícito de data leakage
 │   ├── preprocessing.py          # ColumnTransformer com imputação + one-hot + escalonamento numérico opcional
 │   ├── contract_validate.py      # validação automática dos data contracts
 │   ├── schema.py                 # harmonização/alinhamento de schema entre anos
@@ -265,6 +266,7 @@ fiap-techchalenge-f5/
     ├── test_features.py          # testes da seleção/split de features
     ├── test_imputation.py        # testes da política e plano de imputação
     ├── test_inference_reusability.py # testes do contrato de entrada e reuso do pré-processamento na inferência
+    ├── test_leakage.py           # testes da lista negra e asserts temporais anti-leakage
     ├── test_logging.py           # testes de logging centralizado
     ├── test_preprocessing_bundle.py # testes de integração do bundle (raw -> engineered -> preprocessor)
     ├── test_preprocessing.py     # testes do ColumnTransformer e OneHotEncoder
@@ -390,6 +392,14 @@ Observação: mantenha este comando de cobertura sempre documentado no `README.m
   - `age_bucket` (`07_10`, `11_14`, `15_18`, `19_plus`)
 - A engenharia é opt-in no bundle (`enable_feature_engineering=True/False`) e pode incluir/excluir `age_bucket` (`enable_age_bucket`).
 
+## Gate Anti-Leakage (Fase 4)
+
+- A validação explícita de leakage fica em `src/leakage.py` com `assert_no_leakage(...)`.
+- O gate roda em dois pontos:
+  - construção de pares temporais (`make_temporal_pairs`), com assert temporal `t -> t+1`;
+  - validação de inferência (`validate_inference_frame`) para bloquear payloads com colunas suspeitas (ex.: `_y`, `_t1`, `target`, `t+1`).
+- Colunas suspeitas e 100% ausentes (artefato estrutural de alinhamento) são removidas antes do assert final de treino, mantendo logs apenas agregados por nome de coluna.
+
 ## Checklist do Projeto - Datathon Machine Learning Engineering
 
 Este checklist foi elaborado considerando explicitamente as inconsistências reais do dataset fornecido (schemas distintos entre anos, colunas duplicadas, valores inválidos, mudanças semânticas de campos e interseção parcial de estudantes entre períodos). As etapas descritas adotam práticas de Data Engineering e MLOps para garantir robustez, reprodutibilidade e validade estatística do modelo em produção.
@@ -397,21 +407,21 @@ Este checklist foi elaborado considerando explicitamente as inconsistências rea
 Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 
 Progresso geral (barra visual):
-`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
+`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`52 de 110 tarefas concluídas (47.3%)`
+`53 de 110 tarefas concluídas (48.2%)`
 
 | Fase | Progresso |
 |---|---|
 | Fase 1 - Entendimento do Problema e Target | 13/13 |
 | Fase 2 - Organização do Projeto e Ambiente | 7/7 |
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 14/14 |
-| Fase 4 - Pré-processamento e Engenharia de Features | 6/10 |
+| Fase 4 - Pré-processamento e Engenharia de Features | 7/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 0/17 |
 | Fase 6 - Artefatos, API e Deploy | 0/15 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 2/13 |
 | Fase 8 - Documentação e Entrega Final | 10/21 |
-| Total | 52/110 |
+| Total | 53/110 |
 
 ### Fase 1 - Entendimento do Problema e Target [13/13]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
@@ -460,14 +470,14 @@ Nota de coorte temporal:
 - [x] Definir regra formal de coorte temporal por `RA` (entradas, saídas e interseções por ano)
 - [x] Gerar e registrar estatísticas de interseção por `RA` entre anos (contagem absoluta e percentual)
 
-### Fase 4 - Pré-processamento e Engenharia de Features [6/10]
+### Fase 4 - Pré-processamento e Engenharia de Features [7/10]
 - [x] Separar features numéricas e categóricas
 - [x] Tratar valores ausentes (imputação)
 - [x] Codificar variáveis categóricas (`OneHotEncoder` ou similar)
 - [x] Escalonar variáveis numéricas (se necessário)
 - [x] Garantir que o pré-processamento seja reutilizável na inferência
 - [x] Criar novas features relevantes (se aplicável)
-- [ ] Implementar checagem explícita de data leakage (lista negra de colunas futuras + asserts temporais)
+- [x] Implementar checagem explícita de data leakage (lista negra de colunas futuras + asserts temporais)
 - [ ] Remover colunas irrelevantes ou com leakage
 - [ ] Garantir que nenhuma feature use informação futura
 - [ ] Documentar as principais decisões de feature engineering

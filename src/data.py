@@ -18,6 +18,7 @@ from src.features import (
     persist_feature_split_report,
     split_numeric_categorical_datetime,
 )
+from src.leakage import DEFAULT_ALLOWLIST, assert_no_leakage, detect_leakage_columns
 from src.schema import (
     align_years_with_metadata,
     harmonize_schema_year,
@@ -320,6 +321,60 @@ def make_temporal_pairs(
     feature_split_report["year_t"] = year_t
     feature_split_report["year_t1"] = year_t1
     X = X_raw.loc[:, feature_cols].copy()
+
+    leakage_report = detect_leakage_columns(
+        X=X,
+        year_t=year_t,
+        year_t1=year_t1,
+        allowlist=DEFAULT_ALLOWLIST,
+        include_year_specific=True,
+    )
+    dropped_suspect_all_missing: list[str] = []
+    if leakage_report["n_suspect"] > 0:
+        dropped_suspect_all_missing = sorted(
+            [
+                column
+                for column in leakage_report["suspect_columns"]
+                if column in X.columns and X[column].isna().all()
+            ]
+        )
+        if dropped_suspect_all_missing:
+            X = X.drop(columns=dropped_suspect_all_missing)
+            _logger.warning(
+                "Dropped all-missing leakage-suspect columns %s->%s | cols=%s",
+                year_t,
+                year_t1,
+                dropped_suspect_all_missing,
+            )
+
+    # Explicit anti-leakage gate for temporal pairing after dropping structural all-missing suspects.
+    assert_no_leakage(
+        X=X,
+        year_t=year_t,
+        year_t1=year_t1,
+        allowlist=DEFAULT_ALLOWLIST,
+        include_year_specific=True,
+    )
+
+    numeric_cols = [column for column in numeric_cols if column in X.columns]
+    categorical_cols = [column for column in categorical_cols if column in X.columns]
+    datetime_cols = [column for column in datetime_cols if column in X.columns]
+    all_missing_after_leakage = [
+        column
+        for column in feature_split_report["all_missing_cols_no_recorte"]
+        if column in X.columns
+    ]
+    feature_split_report["n_total_features"] = len(X.columns)
+    feature_split_report["n_numeric"] = len(numeric_cols)
+    feature_split_report["n_categorical"] = len(categorical_cols)
+    feature_split_report["n_datetime"] = len(datetime_cols)
+    feature_split_report["numeric_cols"] = numeric_cols
+    feature_split_report["categorical_cols"] = categorical_cols
+    feature_split_report["datetime_cols"] = datetime_cols
+    feature_split_report["all_missing_cols_no_recorte"] = all_missing_after_leakage
+    feature_split_report["n_all_missing_cols_no_recorte"] = len(all_missing_after_leakage)
+    feature_split_report["leakage_suspect_columns"] = leakage_report["suspect_columns"]
+    feature_split_report["leakage_dropped_all_missing"] = dropped_suspect_all_missing
     X.attrs["feature_split"] = feature_split_report
     if persist_feature_split:
         persist_feature_split_report(feature_split_report, path=feature_split_report_path)
@@ -362,7 +417,7 @@ def make_temporal_pairs(
         year_t,
         year_t1,
         len(feature_cols_t),
-        len(feature_cols),
+        len(X.columns),
         len(feature_split_report["excluded_cols"]),
         len(numeric_cols),
         len(categorical_cols),

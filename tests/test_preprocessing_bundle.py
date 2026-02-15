@@ -68,3 +68,24 @@ def test_bundle_fit_transform_with_feature_engineering_enabled() -> None:
     X_inf_model, _ = to_model_frame(X_inf_raw, context="inference")
     Xt = preprocessor.transform(X_inf_model)
     assert Xt.shape[0] == len(X_inf_raw)
+
+
+@pytest.mark.skipif(not _SKLEARN_AVAILABLE, reason="scikit-learn não disponível no ambiente")
+def test_transform_raw_to_model_frame_blocks_suspicious_model_columns() -> None:
+    bundle = build_preprocessing_bundle(
+        numeric_scaler="standard",
+        enable_feature_engineering=True,
+        enable_age_bucket=True,
+    )
+    to_model_frame = bundle["transform_raw_to_model_frame"]
+    raw_cols = bundle["expected_raw_cols"]
+    model_cols = bundle["expected_model_cols"]
+
+    # Force model-frame gate by injecting a suspicious model column and expecting it.
+    if "my_feature_t1" not in model_cols:
+        model_cols.append("my_feature_t1")
+    X_raw = _build_raw_frame(n_rows=3).loc[:, raw_cols]
+    X_raw["my_feature_t1"] = pd.Series([0.1, 0.2, 0.3], dtype="Float64")
+
+    with pytest.raises(ValueError, match="Leakage detected"):
+        to_model_frame(X_raw, context="inference")
