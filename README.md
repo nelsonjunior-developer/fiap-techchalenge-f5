@@ -244,6 +244,7 @@ fiap-techchalenge-f5/
 │   ├── contracts.py              # definição/export de data contracts por ano
 │   ├── data.py                   # ingestão XLSX e geração de pares temporais
 │   ├── dtypes.py                 # padronização de tipos e auditoria de coerção
+│   ├── feature_pruning.py        # plano determinístico de remoção de colunas irrelevantes/leakage
 │   ├── features.py               # seleção de features e split num/cat/datetime
 │   ├── imputation.py             # plano de imputação de missing para treino/inferência
 │   ├── leakage.py                # detecção/assert explícito de data leakage
@@ -263,6 +264,7 @@ fiap-techchalenge-f5/
     ├── test_contracts.py         # testes dos contratos de dados por ano
     ├── test_data.py              # testes de ingestão e pares temporais
     ├── test_dtypes.py            # testes da padronização de tipos
+    ├── test_feature_pruning.py   # testes do feature pruning plan (fit-only treino, apply-only inferência)
     ├── test_features.py          # testes da seleção/split de features
     ├── test_imputation.py        # testes da política e plano de imputação
     ├── test_inference_reusability.py # testes do contrato de entrada e reuso do pré-processamento na inferência
@@ -400,6 +402,19 @@ Observação: mantenha este comando de cobertura sempre documentado no `README.m
   - validação de inferência (`validate_inference_frame`) para bloquear payloads com colunas suspeitas (ex.: `_y`, `_t1`, `target`, `t+1`).
 - Colunas suspeitas e 100% ausentes (artefato estrutural de alinhamento) são removidas antes do assert final de treino, mantendo logs apenas agregados por nome de coluna.
 
+## Feature Pruning (Fase 4)
+
+- A remoção de colunas irrelevantes/leakage é feita por plano determinístico em `src/feature_pruning.py`.
+- O plano (`compute_feature_pruning_plan`) é calculado apenas no treino, após feature engineering.
+- Regras auditáveis do pruning:
+  - `all-missing`
+  - constante (`n_unique <= 1`)
+  - alta cardinalidade categórica (threshold absoluto e por taxa)
+  - exclusões explícitas (ex.: PII)
+  - colunas bloqueadas por leakage (já detectadas pelos gates)
+- Na inferência, o plano é somente aplicado (`apply_feature_pruning_plan`) sem recalcular critérios no payload de produção.
+- Artefato local de auditoria: `artifacts/feature_pruning_report.json`.
+
 ## Checklist do Projeto - Datathon Machine Learning Engineering
 
 Este checklist foi elaborado considerando explicitamente as inconsistências reais do dataset fornecido (schemas distintos entre anos, colunas duplicadas, valores inválidos, mudanças semânticas de campos e interseção parcial de estudantes entre períodos). As etapas descritas adotam práticas de Data Engineering e MLOps para garantir robustez, reprodutibilidade e validade estatística do modelo em produção.
@@ -409,19 +424,19 @@ Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 Progresso geral (barra visual):
 `[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`53 de 110 tarefas concluídas (48.2%)`
+`54 de 110 tarefas concluídas (49.1%)`
 
 | Fase | Progresso |
 |---|---|
 | Fase 1 - Entendimento do Problema e Target | 13/13 |
 | Fase 2 - Organização do Projeto e Ambiente | 7/7 |
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 14/14 |
-| Fase 4 - Pré-processamento e Engenharia de Features | 7/10 |
+| Fase 4 - Pré-processamento e Engenharia de Features | 8/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 0/17 |
 | Fase 6 - Artefatos, API e Deploy | 0/15 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 2/13 |
 | Fase 8 - Documentação e Entrega Final | 10/21 |
-| Total | 53/110 |
+| Total | 54/110 |
 
 ### Fase 1 - Entendimento do Problema e Target [13/13]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
@@ -470,7 +485,7 @@ Nota de coorte temporal:
 - [x] Definir regra formal de coorte temporal por `RA` (entradas, saídas e interseções por ano)
 - [x] Gerar e registrar estatísticas de interseção por `RA` entre anos (contagem absoluta e percentual)
 
-### Fase 4 - Pré-processamento e Engenharia de Features [7/10]
+### Fase 4 - Pré-processamento e Engenharia de Features [8/10]
 - [x] Separar features numéricas e categóricas
 - [x] Tratar valores ausentes (imputação)
 - [x] Codificar variáveis categóricas (`OneHotEncoder` ou similar)
@@ -478,7 +493,7 @@ Nota de coorte temporal:
 - [x] Garantir que o pré-processamento seja reutilizável na inferência
 - [x] Criar novas features relevantes (se aplicável)
 - [x] Implementar checagem explícita de data leakage (lista negra de colunas futuras + asserts temporais)
-- [ ] Remover colunas irrelevantes ou com leakage
+- [x] Remover colunas irrelevantes ou com leakage
 - [ ] Garantir que nenhuma feature use informação futura
 - [ ] Documentar as principais decisões de feature engineering
 

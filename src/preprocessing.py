@@ -8,6 +8,10 @@ from typing import Any
 import pandas as pd
 
 from src.contracts import PII_COLUMNS
+from src.feature_pruning import (
+    apply_feature_pruning_plan,
+    compute_feature_pruning_plan,
+)
 from src.features import add_engineered_features, get_engineered_feature_names
 from src.leakage import detect_leakage_columns, assert_no_leakage
 from src.utils import get_logger
@@ -292,6 +296,7 @@ def build_preprocessing_bundle(
     *,
     enable_feature_engineering: bool = True,
     enable_age_bucket: bool = True,
+    feature_pruning_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build reusable preprocessing assets for both train and inference paths."""
     expected_raw_cols = get_expected_raw_feature_columns(
@@ -309,11 +314,22 @@ def build_preprocessing_bundle(
         categorical_cols=expanded_categorical,
     )
     excluded_cols = get_excluded_columns()
+    preprocessor_numeric_cols = expanded_numeric
+    preprocessor_categorical_cols = expanded_categorical
+    if feature_pruning_plan is not None:
+        preprocessor_numeric_cols = list(
+            feature_pruning_plan.get("kept_numeric_cols", [])
+        )
+        preprocessor_categorical_cols = list(
+            feature_pruning_plan.get("kept_categorical_cols", [])
+        )
+        expected_model_cols = list(feature_pruning_plan.get("kept_model_cols", []))
+
     preprocessor = build_preprocessor(
-        numeric_cols=numeric_cols,
-        categorical_cols=categorical_cols,
+        numeric_cols=preprocessor_numeric_cols,
+        categorical_cols=preprocessor_categorical_cols,
         numeric_scaler=numeric_scaler,
-        enable_feature_engineering=enable_feature_engineering,
+        enable_feature_engineering=False,
         enable_age_bucket=enable_age_bucket,
     )
 
@@ -337,14 +353,16 @@ def build_preprocessing_bundle(
                 enable_age_bucket=enable_age_bucket,
                 strict=strict,
             )
-
-        missing_model_cols = sorted(set(expected_model_cols) - set(X_model.columns))
-        if missing_model_cols:
-            raise ValueError(
-                f"[{context}] Missing model columns after feature engineering: "
-                f"{missing_model_cols}"
-            )
-        X_model = X_model.loc[:, expected_model_cols].copy()
+        if feature_pruning_plan is not None:
+            X_model = apply_feature_pruning_plan(X_model, feature_pruning_plan)
+        else:
+            missing_model_cols = sorted(set(expected_model_cols) - set(X_model.columns))
+            if missing_model_cols:
+                raise ValueError(
+                    f"[{context}] Missing model columns after feature engineering: "
+                    f"{missing_model_cols}"
+                )
+            X_model = X_model.loc[:, expected_model_cols].copy()
         assert_no_leakage(
             X_model,
             year_t=None,
@@ -362,8 +380,56 @@ def build_preprocessing_bundle(
         "preprocessor": preprocessor,
         "enable_feature_engineering": enable_feature_engineering,
         "enable_age_bucket": enable_age_bucket,
+        "feature_pruning_plan": feature_pruning_plan,
         "transform_raw_to_model_frame": transform_raw_to_model_frame,
     }
+
+
+def build_pruning_plan_from_training_frame(
+    X_train_raw: pd.DataFrame,
+    numeric_cols: list[str] = NUMERIC_COLS,
+    categorical_cols: list[str] = CATEGORICAL_COLS,
+    *,
+    enable_feature_engineering: bool = True,
+    enable_age_bucket: bool = True,
+    excluded_cols: list[str] | None = None,
+    leakage_suspects: list[str] | None = None,
+    pruning_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Compute pruning plan on training data only (fit step)."""
+    expected_raw_cols = get_expected_raw_feature_columns(
+        numeric_cols=numeric_cols,
+        categorical_cols=categorical_cols,
+    )
+    validate_inference_frame(
+        X_train_raw,
+        expected_cols=expected_raw_cols,
+        context="training",
+        log_extras=False,
+    )
+    X_model = X_train_raw.loc[:, expected_raw_cols].copy()
+    if enable_feature_engineering:
+        X_model, _ = add_engineered_features(
+            X_model,
+            enable_age_bucket=enable_age_bucket,
+            strict=False,
+        )
+    expanded_numeric, expanded_categorical = _expand_model_feature_columns(
+        numeric_cols,
+        categorical_cols,
+        enable_feature_engineering=enable_feature_engineering,
+        enable_age_bucket=enable_age_bucket,
+    )
+    effective_excluded = list(get_excluded_columns() if excluded_cols is None else excluded_cols)
+    return compute_feature_pruning_plan(
+        X=X_model,
+        numeric_cols=expanded_numeric,
+        categorical_cols=expanded_categorical,
+        datetime_cols=[],
+        excluded_cols=effective_excluded,
+        pruning_config=pruning_config,
+        leakage_suspects=leakage_suspects,
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover - convenience smoke usage
