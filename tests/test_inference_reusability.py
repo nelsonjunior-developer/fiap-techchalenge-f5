@@ -73,13 +73,19 @@ def test_validate_inference_allows_extras() -> None:
 @pytest.mark.skipif(not _SKLEARN_AVAILABLE, reason="scikit-learn não disponível no ambiente")
 def test_bundle_keys_and_no_pii_in_expected() -> None:
     bundle = build_preprocessing_bundle(numeric_scaler="standard")
-    assert set(bundle.keys()) == {
+    expected_subset = {
         "expected_cols",
+        "expected_raw_cols",
+        "expected_model_cols",
         "excluded_cols",
         "numeric_scaler",
         "preprocessor",
+        "enable_feature_engineering",
+        "enable_age_bucket",
+        "transform_raw_to_model_frame",
     }
-    assert not (set(bundle["expected_cols"]) & set(bundle["excluded_cols"]))
+    assert expected_subset.issubset(set(bundle.keys()))
+    assert not (set(bundle["expected_raw_cols"]) & set(bundle["excluded_cols"]))
 
 
 @pytest.mark.skipif(not _SKLEARN_AVAILABLE, reason="scikit-learn não disponível no ambiente")
@@ -89,12 +95,18 @@ def test_preprocessor_fit_transform_inference_schema() -> None:
     assert len(expected_cols) == n_expected
 
     X_train = _build_expected_frame()
-    bundle = build_preprocessing_bundle(numeric_scaler="standard")
+    bundle = build_preprocessing_bundle(
+        numeric_scaler="standard",
+        enable_feature_engineering=True,
+        enable_age_bucket=True,
+    )
     preprocessor = bundle["preprocessor"]
-    preprocessor.fit(X_train)
+    transform_raw_to_model_frame = bundle["transform_raw_to_model_frame"]
+    X_train_model, _ = transform_raw_to_model_frame(X_train, context="train")
+    preprocessor.fit(X_train_model)
 
     X_inf = _build_expected_frame(n_rows=3)
     X_inf.loc[:, "Fase"] = pd.Series(["NOVA_FASE", "B", "A"], dtype="string")
-    transformed = preprocessor.transform(X_inf)
+    X_inf_model, _ = transform_raw_to_model_frame(X_inf, context="inference")
+    transformed = preprocessor.transform(X_inf_model)
     assert transformed.shape[0] == len(X_inf)
-

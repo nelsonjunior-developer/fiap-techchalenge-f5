@@ -266,6 +266,7 @@ fiap-techchalenge-f5/
     ├── test_imputation.py        # testes da política e plano de imputação
     ├── test_inference_reusability.py # testes do contrato de entrada e reuso do pré-processamento na inferência
     ├── test_logging.py           # testes de logging centralizado
+    ├── test_preprocessing_bundle.py # testes de integração do bundle (raw -> engineered -> preprocessor)
     ├── test_preprocessing.py     # testes do ColumnTransformer e OneHotEncoder
     ├── test_schema.py            # testes de harmonização/alinhamento de schema
     └── test_validate.py          # testes do validador de consistência
@@ -372,8 +373,22 @@ Observação: mantenha este comando de cobertura sempre documentado no `README.m
   - colunas mínimas esperadas (falha com erro claro para colunas faltantes);
   - colunas extras são permitidas por padrão (registradas apenas por nome/contagem).
 - `build_preprocessing_bundle(...)` entrega um bundle reutilizável para treino/API contendo:
-  - `expected_cols`, `excluded_cols`, `numeric_scaler` e `preprocessor`.
-- O mesmo `ColumnTransformer` é usado para treino e inferência, mantendo consistência de imputação/codificação.
+  - `expected_raw_cols` (contrato da API),
+  - `expected_model_cols` (raw + engineered),
+  - `excluded_cols`, `numeric_scaler` e `preprocessor`,
+  - `transform_raw_to_model_frame(...)` para aplicar feature engineering internamente antes do `ColumnTransformer`.
+- O contrato da API valida somente colunas raw; as features derivadas são detalhe interno do pipeline.
+
+## Feature Engineering (Fase 4)
+
+- Features derivadas simples e anti-leakage (somente dados de `t`) são criadas em `src/features.py` por `add_engineered_features(...)`.
+- Numéricas:
+  - `avg_grades`, `min_grade`, `max_grade`, `grade_std`, `missing_grades_count`
+  - `missing_indicators_count`
+  - `defasagem_abs`, `defasagem_neg_flag`, `age_is_missing_flag`
+- Categórica opcional:
+  - `age_bucket` (`07_10`, `11_14`, `15_18`, `19_plus`)
+- A engenharia é opt-in no bundle (`enable_feature_engineering=True/False`) e pode incluir/excluir `age_bucket` (`enable_age_bucket`).
 
 ## Checklist do Projeto - Datathon Machine Learning Engineering
 
@@ -384,19 +399,19 @@ Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 Progresso geral (barra visual):
 `[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`51 de 110 tarefas concluídas (46.4%)`
+`52 de 110 tarefas concluídas (47.3%)`
 
 | Fase | Progresso |
 |---|---|
 | Fase 1 - Entendimento do Problema e Target | 13/13 |
 | Fase 2 - Organização do Projeto e Ambiente | 7/7 |
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 14/14 |
-| Fase 4 - Pré-processamento e Engenharia de Features | 5/10 |
+| Fase 4 - Pré-processamento e Engenharia de Features | 6/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 0/17 |
 | Fase 6 - Artefatos, API e Deploy | 0/15 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 2/13 |
 | Fase 8 - Documentação e Entrega Final | 10/21 |
-| Total | 51/110 |
+| Total | 52/110 |
 
 ### Fase 1 - Entendimento do Problema e Target [13/13]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
@@ -445,13 +460,13 @@ Nota de coorte temporal:
 - [x] Definir regra formal de coorte temporal por `RA` (entradas, saídas e interseções por ano)
 - [x] Gerar e registrar estatísticas de interseção por `RA` entre anos (contagem absoluta e percentual)
 
-### Fase 4 - Pré-processamento e Engenharia de Features [5/10]
+### Fase 4 - Pré-processamento e Engenharia de Features [6/10]
 - [x] Separar features numéricas e categóricas
 - [x] Tratar valores ausentes (imputação)
 - [x] Codificar variáveis categóricas (`OneHotEncoder` ou similar)
 - [x] Escalonar variáveis numéricas (se necessário)
 - [x] Garantir que o pré-processamento seja reutilizável na inferência
-- [ ] Criar novas features relevantes (se aplicável)
+- [x] Criar novas features relevantes (se aplicável)
 - [ ] Implementar checagem explícita de data leakage (lista negra de colunas futuras + asserts temporais)
 - [ ] Remover colunas irrelevantes ou com leakage
 - [ ] Garantir que nenhuma feature use informação futura

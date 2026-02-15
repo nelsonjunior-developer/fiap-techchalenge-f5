@@ -46,7 +46,10 @@ def _build_synthetic_frame(n_rows: int = 6) -> pd.DataFrame:
 
 @pytest.mark.skipif(not _SKLEARN_AVAILABLE, reason="scikit-learn não disponível no ambiente")
 def test_build_preprocessor_types() -> None:
-    preprocessor = build_preprocessor(numeric_scaler=DEFAULT_SCALER_FOR_LINEAR)
+    preprocessor = build_preprocessor(
+        numeric_scaler=DEFAULT_SCALER_FOR_LINEAR,
+        enable_feature_engineering=False,
+    )
 
     assert isinstance(preprocessor, ColumnTransformer)
     names = [name for name, _, _ in preprocessor.transformers]
@@ -67,7 +70,10 @@ def test_preprocessor_fit_transform_shape_stable() -> None:
     X_train = _build_synthetic_frame()
     model_cols = get_feature_columns_for_model()
 
-    preprocessor = build_preprocessor(numeric_scaler=DEFAULT_SCALER_FOR_LINEAR)
+    preprocessor = build_preprocessor(
+        numeric_scaler=DEFAULT_SCALER_FOR_LINEAR,
+        enable_feature_engineering=False,
+    )
     Xt = preprocessor.fit_transform(X_train[model_cols])
 
     assert Xt.ndim == 2
@@ -82,7 +88,10 @@ def test_handle_unknown_does_not_break() -> None:
     X_test.loc[:, "Fase"] = pd.Series(["NOVA_FASE", "B", "A"], dtype="string")
 
     model_cols = get_feature_columns_for_model()
-    preprocessor = build_preprocessor(numeric_scaler=DEFAULT_SCALER_FOR_LINEAR)
+    preprocessor = build_preprocessor(
+        numeric_scaler=DEFAULT_SCALER_FOR_LINEAR,
+        enable_feature_engineering=False,
+    )
     preprocessor.fit(X_train[model_cols])
 
     Xt = preprocessor.transform(X_test[model_cols])
@@ -94,7 +103,10 @@ def test_no_datetime_in_features() -> None:
     model_cols = get_feature_columns_for_model()
 
     assert set(DATETIME_COLS).isdisjoint(model_cols)
-    preprocessor = build_preprocessor(numeric_scaler=DEFAULT_SCALER_FOR_LINEAR)
+    preprocessor = build_preprocessor(
+        numeric_scaler=DEFAULT_SCALER_FOR_LINEAR,
+        enable_feature_engineering=False,
+    )
     used_cols = set(preprocessor.transformers[0][2]) | set(preprocessor.transformers[1][2])
     assert "Data_Nasc" not in used_cols
 
@@ -109,21 +121,27 @@ def test_no_pii_in_features_uses_source_of_truth() -> None:
 
 @pytest.mark.skipif(not _SKLEARN_AVAILABLE, reason="scikit-learn não disponível no ambiente")
 def test_disable_numeric_scaling_removes_scaler_step() -> None:
-    preprocessor = build_preprocessor(numeric_scaler="none")
+    preprocessor = build_preprocessor(
+        numeric_scaler="none",
+        enable_feature_engineering=False,
+    )
     num_pipeline = preprocessor.transformers[0][1]
     assert "scaler" not in num_pipeline.named_steps
 
 
 @pytest.mark.skipif(not _SKLEARN_AVAILABLE, reason="scikit-learn não disponível no ambiente")
 def test_build_preprocessor_uses_robust_scaler_when_requested() -> None:
-    preprocessor = build_preprocessor(numeric_scaler="robust")
+    preprocessor = build_preprocessor(
+        numeric_scaler="robust",
+        enable_feature_engineering=False,
+    )
     num_pipeline = preprocessor.transformers[0][1]
     assert isinstance(num_pipeline.named_steps["scaler"], RobustScaler)
 
 
 @pytest.mark.skipif(not _SKLEARN_AVAILABLE, reason="scikit-learn não disponível no ambiente")
 def test_build_preprocessor_tree_default_has_no_scaler() -> None:
-    preprocessor = build_preprocessor()
+    preprocessor = build_preprocessor(enable_feature_engineering=False)
     num_pipeline = preprocessor.transformers[0][1]
     assert DEFAULT_SCALER_FOR_TREE == "none"
     assert "scaler" not in num_pipeline.named_steps

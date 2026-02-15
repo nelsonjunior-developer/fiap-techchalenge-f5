@@ -8,6 +8,7 @@ from typing import Any
 import pandas as pd
 
 from src.contracts import PII_COLUMNS
+from src.features import add_engineered_features, get_engineered_feature_names
 from src.utils import get_logger
 
 NUMERIC_COLS: list[str] = [
@@ -194,11 +195,33 @@ def _build_numeric_scaler(scaler: str) -> Any:
     )
 
 
+def _expand_model_feature_columns(
+    numeric_cols: list[str],
+    categorical_cols: list[str],
+    *,
+    enable_feature_engineering: bool,
+    enable_age_bucket: bool,
+) -> tuple[list[str], list[str]]:
+    expanded_numeric = _stable_unique(list(numeric_cols))
+    expanded_categorical = _stable_unique(list(categorical_cols))
+    if not enable_feature_engineering:
+        return expanded_numeric, expanded_categorical
+
+    engineered = get_engineered_feature_names(enable_age_bucket=enable_age_bucket)
+    expanded_numeric = _stable_unique(expanded_numeric + engineered["numeric"])
+    expanded_categorical = _stable_unique(
+        expanded_categorical + engineered["categorical"]
+    )
+    return expanded_numeric, expanded_categorical
+
+
 def build_preprocessor(
     numeric_cols: list[str] = NUMERIC_COLS,
     categorical_cols: list[str] = CATEGORICAL_COLS,
     *,
     numeric_scaler: str = DEFAULT_SCALER_FOR_TREE,
+    enable_feature_engineering: bool = True,
+    enable_age_bucket: bool = True,
 ) -> Any:
     """Build sklearn ColumnTransformer with imputers + one-hot encoding."""
     if not _SKLEARN_AVAILABLE:
@@ -206,8 +229,12 @@ def build_preprocessor(
             "scikit-learn não disponível. Instale as dependências de requirements.txt."
         )
 
-    numeric = _stable_unique(list(numeric_cols))
-    categorical = _stable_unique(list(categorical_cols))
+    numeric, categorical = _expand_model_feature_columns(
+        numeric_cols,
+        categorical_cols,
+        enable_feature_engineering=enable_feature_engineering,
+        enable_age_bucket=enable_age_bucket,
+    )
     overlap = sorted(set(numeric) & set(categorical))
     if overlap:
         raise ValueError(f"Colunas sobrepostas entre blocos num/cat: {overlap}")
@@ -248,23 +275,73 @@ def build_preprocessing_bundle(
     numeric_scaler: str = DEFAULT_SCALER_FOR_TREE,
     numeric_cols: list[str] = NUMERIC_COLS,
     categorical_cols: list[str] = CATEGORICAL_COLS,
+    *,
+    enable_feature_engineering: bool = True,
+    enable_age_bucket: bool = True,
 ) -> dict[str, Any]:
     """Build reusable preprocessing assets for both train and inference paths."""
-    expected_cols = get_expected_raw_feature_columns(
+    expected_raw_cols = get_expected_raw_feature_columns(
         numeric_cols=numeric_cols,
         categorical_cols=categorical_cols,
+    )
+    expanded_numeric, expanded_categorical = _expand_model_feature_columns(
+        numeric_cols,
+        categorical_cols,
+        enable_feature_engineering=enable_feature_engineering,
+        enable_age_bucket=enable_age_bucket,
+    )
+    expected_model_cols = get_feature_columns_for_model(
+        numeric_cols=expanded_numeric,
+        categorical_cols=expanded_categorical,
     )
     excluded_cols = get_excluded_columns()
     preprocessor = build_preprocessor(
         numeric_cols=numeric_cols,
         categorical_cols=categorical_cols,
         numeric_scaler=numeric_scaler,
+        enable_feature_engineering=enable_feature_engineering,
+        enable_age_bucket=enable_age_bucket,
     )
+
+    def transform_raw_to_model_frame(
+        X_raw: pd.DataFrame, *, strict: bool = False, context: str = "inference"
+    ) -> tuple[pd.DataFrame, dict[str, Any]]:
+        validate_inference_frame(
+            X_raw,
+            expected_cols=expected_raw_cols,
+            context=context,
+        )
+        X_model = X_raw.loc[:, expected_raw_cols].copy()
+        feature_report: dict[str, Any] = {
+            "features_added": [],
+            "base_columns_used": [],
+            "enable_age_bucket": bool(enable_age_bucket),
+        }
+        if enable_feature_engineering:
+            X_model, feature_report = add_engineered_features(
+                X_model,
+                enable_age_bucket=enable_age_bucket,
+                strict=strict,
+            )
+
+        missing_model_cols = sorted(set(expected_model_cols) - set(X_model.columns))
+        if missing_model_cols:
+            raise ValueError(
+                f"[{context}] Missing model columns after feature engineering: "
+                f"{missing_model_cols}"
+            )
+        return X_model.loc[:, expected_model_cols].copy(), feature_report
+
     return {
-        "expected_cols": expected_cols,
+        "expected_cols": expected_raw_cols,
+        "expected_raw_cols": expected_raw_cols,
+        "expected_model_cols": expected_model_cols,
         "excluded_cols": excluded_cols,
         "numeric_scaler": numeric_scaler,
         "preprocessor": preprocessor,
+        "enable_feature_engineering": enable_feature_engineering,
+        "enable_age_bucket": enable_age_bucket,
+        "transform_raw_to_model_frame": transform_raw_to_model_frame,
     }
 
 

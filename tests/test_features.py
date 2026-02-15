@@ -5,7 +5,9 @@ import pandas as pd
 
 import src.data as data
 from src.features import (
+    add_engineered_features,
     DEFAULT_EXCLUDE_COLUMNS,
+    get_engineered_feature_names,
     get_feature_columns,
     persist_feature_split_report,
     split_numeric_categorical_datetime,
@@ -159,3 +161,79 @@ def test_make_temporal_pairs_applies_feature_split_and_optional_persist(
     assert ids.tolist() == ["1", "2"]
     assert y.tolist() == [1, 0]
 
+
+def test_add_engineered_features_basic() -> None:
+    X = pd.DataFrame(
+        {
+            "Mat": pd.Series([7.0, 8.0, pd.NA], dtype="Float64"),
+            "Por": pd.Series([6.0, 7.5, 9.0], dtype="Float64"),
+            "Ing": pd.Series([pd.NA, 8.0, 7.0], dtype="Float64"),
+            "Defasagem": pd.Series([-1, 0, 2], dtype="Int64"),
+            "Idade": pd.Series([10, 15, pd.NA], dtype="Int64"),
+            "IAA": pd.Series([7.0, pd.NA, 8.0], dtype="Float64"),
+            "IAN": pd.Series([6.0, 7.0, pd.NA], dtype="Float64"),
+            "IDA": pd.Series([5.0, 6.0, 7.0], dtype="Float64"),
+            "IEG": pd.Series([8.0, 8.5, 9.0], dtype="Float64"),
+            "IPS": pd.Series([7.5, pd.NA, 6.5], dtype="Float64"),
+            "IPV": pd.Series([8.0, 8.0, 8.0], dtype="Float64"),
+            "INDE": pd.Series([7.2, 7.8, pd.NA], dtype="Float64"),
+        }
+    )
+
+    X_out, report = add_engineered_features(X, enable_age_bucket=True)
+    engineered = get_engineered_feature_names(enable_age_bucket=True)["all"]
+    for feature in engineered:
+        assert feature in X_out.columns
+    assert set(report["features_added"]).issuperset(set(engineered))
+
+
+def test_strict_false_missing_columns_does_not_break() -> None:
+    X = pd.DataFrame(
+        {
+            "Mat": pd.Series([7.0, pd.NA], dtype="Float64"),
+            "Por": pd.Series([8.0, 6.0], dtype="Float64"),
+            "Defasagem": pd.Series([-1, 1], dtype="Int64"),
+        }
+    )
+    X_out, report = add_engineered_features(X, strict=False, enable_age_bucket=False)
+    assert "avg_grades" in X_out.columns
+    assert "missing_indicators_count" not in X_out.columns
+    assert report["enable_age_bucket"] is False
+
+
+def test_no_mutation_when_adding_engineered_features() -> None:
+    X = pd.DataFrame(
+        {
+            "Mat": pd.Series([7.0], dtype="Float64"),
+            "Por": pd.Series([8.0], dtype="Float64"),
+            "Defasagem": pd.Series([0], dtype="Int64"),
+            "Idade": pd.Series([12], dtype="Int64"),
+        }
+    )
+    original_columns = list(X.columns)
+    _ = add_engineered_features(X)
+    assert list(X.columns) == original_columns
+
+
+def test_age_bucket_bins() -> None:
+    X = pd.DataFrame(
+        {
+            "Idade": pd.Series([9, 15, pd.NA, 22], dtype="Int64"),
+        }
+    )
+    X_out, _ = add_engineered_features(X, enable_age_bucket=True)
+    expected = pd.Series(["07_10", "15_18", pd.NA, "19_plus"], dtype="string")
+    assert X_out["age_bucket"].fillna("<NA>").tolist() == expected.fillna("<NA>").tolist()
+
+
+def test_report_contains_only_names() -> None:
+    X = pd.DataFrame(
+        {
+            "Mat": pd.Series([7.0], dtype="Float64"),
+            "Por": pd.Series([8.0], dtype="Float64"),
+            "Defasagem": pd.Series([0], dtype="Int64"),
+        }
+    )
+    _, report = add_engineered_features(X)
+    assert all(isinstance(item, str) for item in report["features_added"])
+    assert all(isinstance(item, str) for item in report["base_columns_used"])
