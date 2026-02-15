@@ -245,6 +245,8 @@ fiap-techchalenge-f5/
 │   ├── data.py                   # ingestão XLSX e geração de pares temporais
 │   ├── dtypes.py                 # padronização de tipos e auditoria de coerção
 │   ├── features.py               # seleção de features e split num/cat/datetime
+│   ├── imputation.py             # plano de imputação de missing para treino/inferência
+│   ├── preprocessing.py          # ColumnTransformer com imputação + one-hot + escalonamento numérico opcional
 │   ├── contract_validate.py      # validação automática dos data contracts
 │   ├── schema.py                 # harmonização/alinhamento de schema entre anos
 │   ├── utils.py                  # utilitários compartilhados (ex.: logging)
@@ -261,7 +263,10 @@ fiap-techchalenge-f5/
     ├── test_data.py              # testes de ingestão e pares temporais
     ├── test_dtypes.py            # testes da padronização de tipos
     ├── test_features.py          # testes da seleção/split de features
+    ├── test_imputation.py        # testes da política e plano de imputação
+    ├── test_inference_reusability.py # testes do contrato de entrada e reuso do pré-processamento na inferência
     ├── test_logging.py           # testes de logging centralizado
+    ├── test_preprocessing.py     # testes do ColumnTransformer e OneHotEncoder
     ├── test_schema.py            # testes de harmonização/alinhamento de schema
     └── test_validate.py          # testes do validador de consistência
 ```
@@ -331,6 +336,45 @@ Observação: mantenha este comando de cobertura sempre documentado no `README.m
   - `make_temporal_pairs(..., persist_feature_split=True)` gera `artifacts/feature_split_report.json`.
   - por padrão (`persist_feature_split=False`), não há side effect de escrita em disco.
 
+## Imputação de Missing (Fase 4)
+
+- A política de imputação é definida como plano auditável em `src/imputation.py`, para uso dentro de `Pipeline/ColumnTransformer` na etapa de treino.
+- Estratégias padrão:
+  - numéricas: `median` + `add_indicator=True`
+  - categóricas: `most_frequent` + `add_indicator=True`
+  - datetime (`Data_Nasc`): não imputado nesta etapa; permanece em `datetime_cols_excluded` para tratamento posterior de feature engineering.
+- Colunas 100% missing no recorte real de treino (`2022->2023`) são removidas do conjunto de imputação quando `drop_all_missing_columns=True`:
+  - `Ativo/ Inativo`, `Ativo/ Inativo__dup1`, `Destaque IPV__dup1`, `Escola`, `INDE 2023`, `INDE 2024`, `INDE 23`, `IPP`, `Pedra 2023`, `Pedra 2024`, `Pedra 23`, `Rec Psicologia`
+- Evidência local:
+  - `artifacts/imputation_plan.json` (gerado por `persist_imputation_plan(...)`).
+
+## Codificação Categórica (Fase 4)
+
+- A codificação categórica é feita com `OneHotEncoder(handle_unknown="ignore")` para tolerar categorias novas em produção sem quebrar inferência.
+- O bloco categórico é aplicado após imputação (`SimpleImputer(strategy="most_frequent", add_indicator=True)`), dentro de `ColumnTransformer` em `src/preprocessing.py`.
+- O bloco numérico usa `SimpleImputer(strategy="median", add_indicator=True)`.
+- `Fase` e `Fase_Ideal` permanecem categóricas nesta etapa.
+- `Data_Nasc` (datetime) não entra na codificação nesta fase; fica para feature engineering posterior.
+
+## Escalonamento Numérico (Fase 4)
+
+- O pré-processador agora suporta escalonamento numérico configurável em `src/preprocessing.py`.
+- Regra adotada:
+  - baseline linear (`Logistic Regression`): usar `numeric_scaler="standard"` (preset `DEFAULT_SCALER_FOR_LINEAR`);
+  - modelos de árvore (ex.: `HistGradientBoosting`): usar `numeric_scaler="none"` (preset `DEFAULT_SCALER_FOR_TREE`).
+- O escalonador pode ser configurado entre `standard`, `robust` e `none`, com validação explícita de parâmetro.
+
+## Reuso do Pré-processamento na Inferência (Fase 4)
+
+- O contrato de entrada para inferência é exposto por `get_expected_raw_feature_columns()` e deriva diretamente de `get_feature_columns_for_model()` (fonte única de verdade).
+- `validate_inference_frame(...)` valida:
+  - tipo de entrada (`pandas.DataFrame`);
+  - colunas mínimas esperadas (falha com erro claro para colunas faltantes);
+  - colunas extras são permitidas por padrão (registradas apenas por nome/contagem).
+- `build_preprocessing_bundle(...)` entrega um bundle reutilizável para treino/API contendo:
+  - `expected_cols`, `excluded_cols`, `numeric_scaler` e `preprocessor`.
+- O mesmo `ColumnTransformer` é usado para treino e inferência, mantendo consistência de imputação/codificação.
+
 ## Checklist do Projeto - Datathon Machine Learning Engineering
 
 Este checklist foi elaborado considerando explicitamente as inconsistências reais do dataset fornecido (schemas distintos entre anos, colunas duplicadas, valores inválidos, mudanças semânticas de campos e interseção parcial de estudantes entre períodos). As etapas descritas adotam práticas de Data Engineering e MLOps para garantir robustez, reprodutibilidade e validade estatística do modelo em produção.
@@ -338,21 +382,21 @@ Este checklist foi elaborado considerando explicitamente as inconsistências rea
 Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 
 Progresso geral (barra visual):
-`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
+`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`47 de 110 tarefas concluídas (42.7%)`
+`51 de 110 tarefas concluídas (46.4%)`
 
 | Fase | Progresso |
 |---|---|
 | Fase 1 - Entendimento do Problema e Target | 13/13 |
 | Fase 2 - Organização do Projeto e Ambiente | 7/7 |
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 14/14 |
-| Fase 4 - Pré-processamento e Engenharia de Features | 1/10 |
+| Fase 4 - Pré-processamento e Engenharia de Features | 5/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 0/17 |
 | Fase 6 - Artefatos, API e Deploy | 0/15 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 2/13 |
 | Fase 8 - Documentação e Entrega Final | 10/21 |
-| Total | 47/110 |
+| Total | 51/110 |
 
 ### Fase 1 - Entendimento do Problema e Target [13/13]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
@@ -401,12 +445,12 @@ Nota de coorte temporal:
 - [x] Definir regra formal de coorte temporal por `RA` (entradas, saídas e interseções por ano)
 - [x] Gerar e registrar estatísticas de interseção por `RA` entre anos (contagem absoluta e percentual)
 
-### Fase 4 - Pré-processamento e Engenharia de Features [1/10]
+### Fase 4 - Pré-processamento e Engenharia de Features [5/10]
 - [x] Separar features numéricas e categóricas
-- [ ] Tratar valores ausentes (imputação)
-- [ ] Codificar variáveis categóricas (`OneHotEncoder` ou similar)
-- [ ] Escalonar variáveis numéricas (se necessário)
-- [ ] Garantir que o pré-processamento seja reutilizável na inferência
+- [x] Tratar valores ausentes (imputação)
+- [x] Codificar variáveis categóricas (`OneHotEncoder` ou similar)
+- [x] Escalonar variáveis numéricas (se necessário)
+- [x] Garantir que o pré-processamento seja reutilizável na inferência
 - [ ] Criar novas features relevantes (se aplicável)
 - [ ] Implementar checagem explícita de data leakage (lista negra de colunas futuras + asserts temporais)
 - [ ] Remover colunas irrelevantes ou com leakage
