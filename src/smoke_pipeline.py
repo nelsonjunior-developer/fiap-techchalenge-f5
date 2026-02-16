@@ -15,6 +15,7 @@ from src.pipeline_components import RawToModelFrameTransformer
 from src.preprocessing import (
     _SKLEARN_AVAILABLE,
     build_preprocessing_bundle,
+    build_pruning_plan_from_training_frame,
     get_expected_raw_feature_columns,
     get_feature_columns_for_model,
 )
@@ -53,6 +54,11 @@ def main() -> int:
             ids_train,
             expected_raw_cols,
         )
+        pruning_plan = build_pruning_plan_from_training_frame(
+            X_train_raw=X_raw_train,
+            enable_feature_engineering=False,
+            enable_age_bucket=False,
+        )
         from sklearn.linear_model import LogisticRegression
 
         from src.train_pipeline import build_model_pipeline
@@ -62,6 +68,7 @@ def main() -> int:
             year_t=2022,
             scaler_strategy="standard",
             enable_feature_engineering=False,
+            feature_pruning_plan=pruning_plan,
             strict_raw=True,
             enable_age_bucket=False,
         )
@@ -104,12 +111,17 @@ def main() -> int:
         ids_train,
         expected_raw_cols,
     )
+    pruning_plan = build_pruning_plan_from_training_frame(
+        X_train_raw=X_raw_train,
+        enable_feature_engineering=False,
+        enable_age_bucket=False,
+    )
     transformer = RawToModelFrameTransformer(
         year_t=2022,
         expected_raw_cols=expected_raw_cols,
-        expected_model_cols=expected_model_cols,
+        expected_model_cols=list(pruning_plan.get("kept_model_cols", expected_model_cols)),
         enable_feature_engineering=False,
-        feature_pruning_plan=None,
+        feature_pruning_plan=pruning_plan,
         strict_raw=True,
         enable_age_bucket=False,
     )

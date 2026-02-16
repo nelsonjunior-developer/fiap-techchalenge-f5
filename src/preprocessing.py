@@ -367,12 +367,24 @@ def build_preprocessing_bundle(
             feature_pruning_plan.get("kept_categorical_cols", [])
         )
         expected_model_cols = list(feature_pruning_plan.get("kept_model_cols", []))
+        if not expected_model_cols:
+            raise ValueError(
+                "feature_pruning_plan inválido: kept_model_cols não pode ser vazio."
+            )
 
     _validate_disjoint_feature_families(
         numeric_cols=preprocessor_numeric_cols,
         categorical_cols=preprocessor_categorical_cols,
         datetime_cols=DATETIME_COLS,
     )
+    model_set = set(expected_model_cols)
+    typed_set = set(preprocessor_numeric_cols) | set(preprocessor_categorical_cols)
+    unknown_model_cols = sorted(model_set - typed_set)
+    if unknown_model_cols:
+        raise ValueError(
+            "Colunas esperadas no model frame não classificadas em num/cat: "
+            f"{unknown_model_cols}"
+        )
 
     preprocessor, ohe_sparse_flag_used = _build_preprocessor_internal(
         numeric_cols=preprocessor_numeric_cols,

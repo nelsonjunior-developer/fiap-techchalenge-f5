@@ -34,6 +34,10 @@ def build_model_pipeline(
         raise ImportError(
             "scikit-learn não disponível. Instale as dependências de requirements.txt."
         )
+    if feature_pruning_plan is None:
+        raise ValueError(
+            "feature_pruning_plan is required for training to ensure train/inference consistency"
+        )
 
     bundle = build_preprocessing_bundle(
         numeric_scaler=scaler_strategy,
@@ -41,12 +45,14 @@ def build_model_pipeline(
         enable_age_bucket=enable_age_bucket,
         feature_pruning_plan=feature_pruning_plan,
     )
+    expected_model_cols_final = list(bundle["expected_model_cols"])
     raw_to_model = RawToModelFrameTransformer(
         year_t=year_t,
         expected_raw_cols=list(bundle["expected_raw_cols"]),
-        expected_model_cols=list(bundle["expected_model_cols"]),
+        expected_model_cols=expected_model_cols_final,
         enable_feature_engineering=enable_feature_engineering,
         feature_pruning_plan=feature_pruning_plan,
+        preprocessing_spec=dict(bundle.get("preprocessing_spec", {})),
         strict_raw=strict_raw,
         enable_age_bucket=enable_age_bucket,
     )
