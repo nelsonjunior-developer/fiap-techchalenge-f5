@@ -416,6 +416,69 @@ Observação: mantenha este comando de cobertura sempre documentado no `README.m
 - Na inferência, o plano é somente aplicado (`apply_feature_pruning_plan`) sem recalcular critérios no payload de produção.
 - Artefato local de auditoria: `artifacts/feature_pruning_report.json`.
 
+## Decisões de Feature Engineering (Fase 4)
+
+Esta fase consolida as decisões necessárias para transformar dados crus (já validados na Fase 3) em um model frame consistente e reutilizável em treino e inferência.
+
+### 1) Princípios e escopo
+- Feature engineering ocorre após ingestão/qualidade (Fase 3) e antes do treinamento (Fase 5).
+- As mesmas transformações são reaplicáveis em inferência via `build_preprocessing_bundle(...)`.
+- O modelo é preditivo (não causal) e opera apenas com dados disponíveis em `t`.
+
+### 2) Exclusões por privacidade e identificação
+- `RA` nunca é feature (somente ID/auditoria).
+- Colunas sensíveis (`PII_COLUMNS` em `src/contracts.py`) são excluídas do model frame, incluindo `Nome_Anon` e `Avaliador1..Avaliador6`.
+- `Nome_Anon` é tratado como sensível porque em 2022 pode representar nome real.
+
+### 3) Split numérico / categórico / datetime (canônico vs snapshot)
+- O preprocessor usa listas canônicas estáveis em `src/preprocessing.py`:
+  - `NUMERIC_COLS`: 18
+  - `CATEGORICAL_COLS`: 18
+  - `DATETIME_COLS`: 1
+- `Data_Nasc` é classificada como datetime, mas não entra no model frame nesta fase.
+
+Snapshots agregados do recorte temporal (após exclusão de PII e drops estruturais de leakage):
+- `2022->2023`: numeric=20, categorical=22, datetime=1, total_features no recorte=43, all_missing remanescente=6, leakage estrutural dropado=6 (`INDE 2023`, `INDE 2024`, `INDE 23`, `Pedra 2023`, `Pedra 2024`, `Pedra 23`).
+- `2023->2024`: numeric=22, categorical=24, datetime=1, total_features no recorte=47, all_missing=19, leakage estrutural dropado=2 (`INDE 2024`, `Pedra 2024`).
+
+### 4) Missing e imputação
+- Numéricas: `SimpleImputer(strategy="median", add_indicator=True)`.
+- Categóricas: `SimpleImputer(strategy="most_frequent", add_indicator=True)`.
+- `add_indicator=True` aumenta dimensionalidade após `fit`, comportamento esperado da pipeline.
+
+### 5) Codificação de categóricas
+- `OneHotEncoder(handle_unknown="ignore")` para robustez com categorias novas na inferência.
+- Compatibilidade de versão do sklearn é tratada em helper único (`sparse_output` vs `sparse`).
+
+### 6) Escalonamento numérico (quando necessário)
+- Baseline linear (`LogisticRegression`): `StandardScaler` (opção `RobustScaler`).
+- Modelo de árvore (`HistGradientBoostingClassifier`): sem scaling por padrão.
+
+### 7) Features derivadas (quando habilitadas)
+- `add_engineered_features(...)` aplica derivação determinística e NA-safe antes do `ColumnTransformer`.
+- Quando habilitadas, as novas colunas entram explicitamente no conjunto esperado do model frame.
+- Não há uso de informação futura nas features derivadas.
+
+### 8) Anti-leakage (RAW + MODEL/TRAIN)
+- `RAW`: bloqueio estrito de colunas extras future-like/target-like.
+- `MODEL/TRAIN`: tolera suspeitas 100% missing (ruído estrutural), mas falha se houver qualquer sinal não nulo.
+- Detecção semântica usa padrões específicos (`INDE/Pedra` + ano, sufixos `_t1`, `target`, etc.) sem regex genérica de ano.
+
+### 9) Pruning (fit no treino, apply na inferência)
+- Pruning remove colunas sem sinal/instáveis com regras configuráveis (all-missing, constante, alta cardinalidade, exclusões explícitas).
+- O plano é fitado no treino e somente aplicado na inferência.
+- Relatórios são agregados (nomes/contagens), sem valores de célula ou IDs.
+
+### 10) Reutilização em inferência
+- A API valida schema raw, aplica feature engineering interno (quando habilitado), aplica seleção/model frame e gate anti-leakage, depois transforma com o mesmo preprocessor do treino.
+- Isso garante consistência treino=inferência.
+
+Referências:
+- `src/preprocessing.py`
+- `src/leakage.py`
+- `src/contracts.py`
+- `src/features.py`
+
 ## Checklist do Projeto - Datathon Machine Learning Engineering
 
 Este checklist foi elaborado considerando explicitamente as inconsistências reais do dataset fornecido (schemas distintos entre anos, colunas duplicadas, valores inválidos, mudanças semânticas de campos e interseção parcial de estudantes entre períodos). As etapas descritas adotam práticas de Data Engineering e MLOps para garantir robustez, reprodutibilidade e validade estatística do modelo em produção.
@@ -425,19 +488,19 @@ Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 Progresso geral (barra visual):
 `[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`55 de 110 tarefas concluídas (50.0%)`
+`56 de 110 tarefas concluídas (50.9%)`
 
 | Fase | Progresso |
 |---|---|
 | Fase 1 - Entendimento do Problema e Target | 13/13 |
 | Fase 2 - Organização do Projeto e Ambiente | 7/7 |
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 14/14 |
-| Fase 4 - Pré-processamento e Engenharia de Features | 9/10 |
+| Fase 4 - Pré-processamento e Engenharia de Features | 10/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 0/17 |
 | Fase 6 - Artefatos, API e Deploy | 0/15 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 2/13 |
 | Fase 8 - Documentação e Entrega Final | 10/21 |
-| Total | 55/110 |
+| Total | 56/110 |
 
 ### Fase 1 - Entendimento do Problema e Target [13/13]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
@@ -486,7 +549,7 @@ Nota de coorte temporal:
 - [x] Definir regra formal de coorte temporal por `RA` (entradas, saídas e interseções por ano)
 - [x] Gerar e registrar estatísticas de interseção por `RA` entre anos (contagem absoluta e percentual)
 
-### Fase 4 - Pré-processamento e Engenharia de Features [9/10]
+### Fase 4 - Pré-processamento e Engenharia de Features [10/10]
 - [x] Separar features numéricas e categóricas
 - [x] Tratar valores ausentes (imputação)
 - [x] Codificar variáveis categóricas (`OneHotEncoder` ou similar)
@@ -496,7 +559,7 @@ Nota de coorte temporal:
 - [x] Implementar checagem explícita de data leakage (lista negra de colunas futuras + asserts temporais)
 - [x] Remover colunas irrelevantes ou com leakage
 - [x] Garantir que nenhuma feature use informação futura
-- [ ] Documentar as principais decisões de feature engineering
+- [x] Documentar as principais decisões de feature engineering
 
 ### Fase 5 - Pipeline, Treinamento e Avaliação [0/17]
 Nota de shift temporal:
