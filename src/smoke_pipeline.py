@@ -126,10 +126,25 @@ def main() -> int:
         enable_age_bucket=False,
     )
     X_model = transformer.transform(X_raw_train.iloc[:20].copy())
+    leak_payload = X_raw_train.iloc[:20].copy()
+    leak_payload["target"] = pd.Series([1] * len(leak_payload), dtype="Int64")
+    leak_blocked = False
+    try:
+        transformer.transform(leak_payload)
+    except ValueError as exc:
+        if "leakage-like" in str(exc).lower():
+            leak_blocked = True
+        else:
+            raise
+    if not leak_blocked:
+        raise RuntimeError(
+            "Expected leakage-like payload to be blocked in RAW gate."
+        )
     print(
         "smoke_pipeline=ok mode=raw_to_model_only "
         f"rows_raw={20 if len(X_raw_train) >= 20 else len(X_raw_train)} "
-        f"cols_raw={len(expected_raw_cols)} cols_model={X_model.shape[1]}"
+        f"cols_raw={len(expected_raw_cols)} cols_model={X_model.shape[1]} "
+        "raw_leakage_gate=ok"
     )
     return 0
 
