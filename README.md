@@ -248,9 +248,12 @@ fiap-techchalenge-f5/
 │   ├── features.py               # seleção de features e split num/cat/datetime
 │   ├── imputation.py             # plano de imputação de missing para treino/inferência
 │   ├── leakage.py                # detecção/assert explícito de data leakage
+│   ├── pipeline_components.py    # transformer sklearn serializável (raw -> model frame)
 │   ├── preprocessing.py          # ColumnTransformer com imputação + one-hot + escalonamento numérico opcional
 │   ├── contract_validate.py      # validação automática dos data contracts
 │   ├── schema.py                 # harmonização/alinhamento de schema entre anos
+│   ├── smoke_pipeline.py         # smoke test oficial da pipeline (com/sem sklearn)
+│   ├── train_pipeline.py         # fábrica da Pipeline sklearn completa (raw_to_model + preprocessor + model)
 │   ├── utils.py                  # utilitários compartilhados (ex.: logging)
 │   └── validate.py               # validação de consistência e geração de relatórios
 └── tests/                        # suíte de testes automatizados
@@ -272,6 +275,8 @@ fiap-techchalenge-f5/
     ├── test_logging.py           # testes de logging centralizado
     ├── test_preprocessing_bundle.py # testes de integração do bundle (raw -> engineered -> preprocessor)
     ├── test_preprocessing.py     # testes do ColumnTransformer e OneHotEncoder
+    ├── test_pipeline_build.py    # testes da pipeline end-to-end serializável (fit/predict/joblib)
+    ├── test_raw_to_model_transformer.py # testes do transformer RAW->MODEL sem dependência de sklearn
     ├── test_schema.py            # testes de harmonização/alinhamento de schema
     └── test_validate.py          # testes do validador de consistência
 ```
@@ -318,6 +323,21 @@ pytest --cov=src --cov-report=term-missing --cov-fail-under=80
 ```
 
 Observação: mantenha este comando de cobertura sempre documentado no `README.md` para padronizar validação local e evidência técnica da entrega.
+
+Observação sobre SKIP: alguns testes de pipeline usam `pytest.importorskip("sklearn")`.
+Se o ambiente não tiver sklearn disponível, esses testes serão marcados como `SKIPPED`.
+No CI da Fase 7, manter instalação via `requirements-dev.txt` para evitar skip indevido.
+
+### Smoke da Pipeline
+
+Executar smoke oficial:
+
+```bash
+python -m src.smoke_pipeline
+```
+
+Com sklearn disponível: roda fit/predict_proba + roundtrip `joblib`.
+Sem sklearn: roda apenas `RawToModelFrameTransformer` e valida o caminho `RAW -> MODEL`.
 
 ## Logging
 
@@ -494,6 +514,18 @@ Referências:
 - Estratégia de scaler:
   - default do bundle: `"none"` (caminho típico para árvores)
   - baseline linear: usar `DEFAULT_SCALER_FOR_LINEAR = "standard"` explicitamente.
+  - na fábrica da pipeline completa (`build_model_pipeline`), o default é `standard` para baseline linear; para árvore, usar `scaler_strategy="none"`.
+
+## Pipeline End-to-End (Fase 5)
+
+- A unidade de treino/inferência serializável é uma `Pipeline` sklearn completa:
+  - `raw_to_model` (`RawToModelFrameTransformer`)
+  - `preprocessor` (`ColumnTransformer`)
+  - `model` (estimador)
+- O estágio `raw_to_model` aplica o mesmo contrato do bundle (`validate_inference_frame`, feature engineering opcional, pruning e gate anti-leakage de model frame).
+- A pipeline recebe `DataFrame` cru no `fit` e no `predict`/`predict_proba`, mantendo consistência com o contrato da API.
+- A construção fica centralizada em `src/train_pipeline.py` (`build_model_pipeline(...)`), sem closures no transformer para garantir serialização via `joblib`.
+- Smoke oficial para esse fluxo: `python -m src.smoke_pipeline`.
 
 ## Checklist do Projeto - Datathon Machine Learning Engineering
 
@@ -504,7 +536,7 @@ Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 Progresso geral (barra visual):
 `[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`57 de 110 tarefas concluídas (51.8%)`
+`58 de 110 tarefas concluídas (52.7%)`
 
 | Fase | Progresso |
 |---|---|
@@ -512,11 +544,11 @@ Progresso geral (barra visual):
 | Fase 2 - Organização do Projeto e Ambiente | 7/7 |
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 14/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 10/10 |
-| Fase 5 - Pipeline, Treinamento e Avaliação | 1/17 |
+| Fase 5 - Pipeline, Treinamento e Avaliação | 2/17 |
 | Fase 6 - Artefatos, API e Deploy | 0/15 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 2/13 |
 | Fase 8 - Documentação e Entrega Final | 10/21 |
-| Total | 57/110 |
+| Total | 58/110 |
 
 ### Fase 1 - Entendimento do Problema e Target [13/13]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
@@ -577,12 +609,12 @@ Nota de coorte temporal:
 - [x] Garantir que nenhuma feature use informação futura
 - [x] Documentar as principais decisões de feature engineering
 
-### Fase 5 - Pipeline, Treinamento e Avaliação [1/17]
+### Fase 5 - Pipeline, Treinamento e Avaliação [2/17]
 Nota de shift temporal:
 > Antes do treinamento final, é realizada uma análise de shift temporal do target e das features, uma vez que a prevalência da classe positiva varia significativamente entre os períodos analisados (aprox. `61%` para `40%`).
 
 - [x] Criar `ColumnTransformer` para pré-processamento
-- [ ] Encapsular tudo em uma `Pipeline` do scikit-learn
+- [x] Encapsular tudo em uma `Pipeline` do scikit-learn
 - [ ] Garantir consistência treino vs inferência
 - [ ] Validar que a pipeline aceita dados crus da API
 - [ ] Treinar modelo baseline (`Logistic Regression`)

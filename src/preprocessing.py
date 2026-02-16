@@ -382,44 +382,28 @@ def build_preprocessing_bundle(
         enable_age_bucket=enable_age_bucket,
     )
 
-    def transform_raw_to_model_frame(
+    def _transform_raw_to_model_frame(
         X_raw: pd.DataFrame, *, strict: bool = False, context: str = "inference"
     ) -> tuple[pd.DataFrame, dict[str, Any]]:
-        validate_inference_frame(
-            X_raw,
-            expected_cols=expected_raw_cols,
+        transformed = transform_raw_to_model_frame(
+            X_raw=X_raw,
+            year_t=None,
+            expected_raw_cols=expected_raw_cols,
+            expected_model_cols=expected_model_cols,
+            enable_feature_engineering=enable_feature_engineering,
+            enable_age_bucket=enable_age_bucket,
+            feature_pruning_plan=feature_pruning_plan,
+            strict_raw=strict,
+            include_report=True,
             context=context,
         )
-        X_model = X_raw.loc[:, expected_raw_cols].copy()
-        feature_report: dict[str, Any] = {
+        if isinstance(transformed, tuple):
+            return transformed
+        return transformed, {
             "features_added": [],
             "base_columns_used": [],
             "enable_age_bucket": bool(enable_age_bucket),
         }
-        if enable_feature_engineering:
-            X_model, feature_report = add_engineered_features(
-                X_model,
-                enable_age_bucket=enable_age_bucket,
-                strict=strict,
-            )
-        missing_model_cols = sorted(set(expected_model_cols) - set(X_model.columns))
-        if missing_model_cols:
-            raise ValueError(
-                f"[{context}] Missing expected model columns: {missing_model_cols}"
-            )
-        if feature_pruning_plan is not None:
-            X_model = apply_feature_pruning_plan(X_model, feature_pruning_plan)
-        else:
-            X_model = X_model.loc[:, expected_model_cols].copy()
-        assert_no_leakage(
-            X_model,
-            year_t=None,
-            year_t1=None,
-            include_year_specific=False,
-            context="MODEL",
-            tolerate_structural_missing=True,
-        )
-        return X_model, feature_report
 
     return {
         "expected_cols": expected_raw_cols,
@@ -442,8 +426,65 @@ def build_preprocessing_bundle(
                 "OneHotEncoder(handle_unknown='ignore') evita quebra por categorias novas.",
             ],
         },
-        "transform_raw_to_model_frame": transform_raw_to_model_frame,
+        "transform_raw_to_model_frame": _transform_raw_to_model_frame,
     }
+
+
+def transform_raw_to_model_frame(
+    X_raw: pd.DataFrame,
+    *,
+    year_t: int | None,
+    expected_raw_cols: list[str],
+    expected_model_cols: list[str],
+    enable_feature_engineering: bool,
+    enable_age_bucket: bool,
+    feature_pruning_plan: dict[str, Any] | None,
+    strict_raw: bool = True,
+    include_report: bool = False,
+    context: str = "inference",
+) -> pd.DataFrame | tuple[pd.DataFrame, dict[str, Any]]:
+    """Top-level raw->model transformation reusable by sklearn transformers."""
+    validate_inference_frame(
+        X_raw,
+        expected_cols=expected_raw_cols,
+        context=context,
+    )
+    X_model = X_raw.loc[:, expected_raw_cols].copy()
+    feature_report: dict[str, Any] = {
+        "features_added": [],
+        "base_columns_used": [],
+        "enable_age_bucket": bool(enable_age_bucket),
+    }
+    if enable_feature_engineering:
+        X_model, feature_report = add_engineered_features(
+            X_model,
+            enable_age_bucket=enable_age_bucket,
+            strict=strict_raw,
+        )
+
+    missing_model_cols = sorted(set(expected_model_cols) - set(X_model.columns))
+    if missing_model_cols:
+        raise ValueError(
+            f"[{context}] Missing expected model columns: {missing_model_cols}"
+        )
+
+    if feature_pruning_plan is not None:
+        X_model = apply_feature_pruning_plan(X_model, feature_pruning_plan)
+        X_model = X_model.loc[:, expected_model_cols].copy()
+    else:
+        X_model = X_model.loc[:, expected_model_cols].copy()
+
+    assert_no_leakage(
+        X_model,
+        year_t=year_t,
+        year_t1=None,
+        include_year_specific=False,
+        context="MODEL",
+        tolerate_structural_missing=True,
+    )
+    if include_report:
+        return X_model, feature_report
+    return X_model
 
 
 def build_pruning_plan_from_training_frame(
