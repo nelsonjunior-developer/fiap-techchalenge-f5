@@ -74,7 +74,7 @@ def test_validate_inference_rejects_suspicious_extras() -> None:
     expected_cols = get_expected_raw_feature_columns()
     X = pd.DataFrame({col: [1] for col in expected_cols})
     X["Defasagem_y"] = 1
-    with pytest.raises(ValueError, match="Leakage-like extra columns detected in payload"):
+    with pytest.raises(ValueError, match=r"\[RAW\] leakage-like columns detected"):
         validate_inference_frame(X, expected_cols=expected_cols)
 
 
@@ -82,7 +82,7 @@ def test_validate_inference_rejects_target_like_extras() -> None:
     expected_cols = get_expected_raw_feature_columns()
     X = pd.DataFrame({col: [1] for col in expected_cols})
     X["target"] = 1
-    with pytest.raises(ValueError, match="Leakage-like extra columns detected in payload"):
+    with pytest.raises(ValueError, match=r"\[RAW\] leakage-like columns detected"):
         validate_inference_frame(X, expected_cols=expected_cols)
 
 

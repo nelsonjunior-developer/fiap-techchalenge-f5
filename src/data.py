@@ -329,23 +329,19 @@ def make_temporal_pairs(
         allowlist=DEFAULT_ALLOWLIST,
         include_year_specific=True,
     )
-    dropped_suspect_all_missing: list[str] = []
-    if leakage_report["n_suspect"] > 0:
-        dropped_suspect_all_missing = sorted(
-            [
-                column
-                for column in leakage_report["suspect_columns"]
-                if column in X.columns and X[column].isna().all()
-            ]
+    dropped_suspect_all_missing = [
+        column
+        for column in leakage_report.get("structural_suspects", [])
+        if column in X.columns
+    ]
+    if dropped_suspect_all_missing:
+        X = X.drop(columns=dropped_suspect_all_missing)
+        _logger.warning(
+            "Dropped all-missing leakage-suspect columns %s->%s | cols=%s",
+            year_t,
+            year_t1,
+            dropped_suspect_all_missing,
         )
-        if dropped_suspect_all_missing:
-            X = X.drop(columns=dropped_suspect_all_missing)
-            _logger.warning(
-                "Dropped all-missing leakage-suspect columns %s->%s | cols=%s",
-                year_t,
-                year_t1,
-                dropped_suspect_all_missing,
-            )
 
     # Explicit anti-leakage gate for temporal pairing after dropping structural all-missing suspects.
     assert_no_leakage(
@@ -354,6 +350,8 @@ def make_temporal_pairs(
         year_t1=year_t1,
         allowlist=DEFAULT_ALLOWLIST,
         include_year_specific=True,
+        context="TRAIN",
+        tolerate_structural_missing=True,
     )
 
     numeric_cols = [column for column in numeric_cols if column in X.columns]
@@ -374,6 +372,8 @@ def make_temporal_pairs(
     feature_split_report["all_missing_cols_no_recorte"] = all_missing_after_leakage
     feature_split_report["n_all_missing_cols_no_recorte"] = len(all_missing_after_leakage)
     feature_split_report["leakage_suspect_columns"] = leakage_report["suspect_columns"]
+    feature_split_report["leakage_real_columns"] = leakage_report["leakage_real"]
+    feature_split_report["leakage_structural_columns"] = leakage_report["structural_suspects"]
     feature_split_report["leakage_dropped_all_missing"] = dropped_suspect_all_missing
     X.attrs["feature_split"] = feature_split_report
     if persist_feature_split:

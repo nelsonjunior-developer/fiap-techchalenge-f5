@@ -397,10 +397,11 @@ Observação: mantenha este comando de cobertura sempre documentado no `README.m
 ## Gate Anti-Leakage (Fase 4)
 
 - A validação explícita de leakage fica em `src/leakage.py` com `assert_no_leakage(...)`.
-- O gate roda em dois pontos:
-  - construção de pares temporais (`make_temporal_pairs`), com assert temporal `t -> t+1`;
-  - validação de inferência (`validate_inference_frame`) para bloquear payloads com colunas suspeitas (ex.: `_y`, `_t1`, `target`, `t+1`).
-- Colunas suspeitas e 100% ausentes (artefato estrutural de alinhamento) são removidas antes do assert final de treino, mantendo logs apenas agregados por nome de coluna.
+- O gate roda em três pontos:
+  - construção de pares temporais (`make_temporal_pairs`) no contexto `TRAIN`, com assert temporal `t -> t+1`;
+  - validação de inferência (`validate_inference_frame`) no contexto `RAW`, bloqueando payloads com colunas suspeitas (ex.: `_y`, `_t1`, `target`, `t+1`);
+  - transformação para model frame (`transform_raw_to_model_frame`) no contexto `MODEL`, antes do `ColumnTransformer`.
+- Colunas suspeitas e 100% ausentes (artefato estrutural de alinhamento) são toleradas apenas quando não têm sinal (`n_non_null = 0`) e podem ser removidas no fluxo de treino, mantendo logs apenas agregados por nome de coluna.
 
 ## Feature Pruning (Fase 4)
 
@@ -422,21 +423,21 @@ Este checklist foi elaborado considerando explicitamente as inconsistências rea
 Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 
 Progresso geral (barra visual):
-`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
+`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`54 de 110 tarefas concluídas (49.1%)`
+`55 de 110 tarefas concluídas (50.0%)`
 
 | Fase | Progresso |
 |---|---|
 | Fase 1 - Entendimento do Problema e Target | 13/13 |
 | Fase 2 - Organização do Projeto e Ambiente | 7/7 |
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 14/14 |
-| Fase 4 - Pré-processamento e Engenharia de Features | 8/10 |
+| Fase 4 - Pré-processamento e Engenharia de Features | 9/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 0/17 |
 | Fase 6 - Artefatos, API e Deploy | 0/15 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 2/13 |
 | Fase 8 - Documentação e Entrega Final | 10/21 |
-| Total | 54/110 |
+| Total | 55/110 |
 
 ### Fase 1 - Entendimento do Problema e Target [13/13]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
@@ -485,7 +486,7 @@ Nota de coorte temporal:
 - [x] Definir regra formal de coorte temporal por `RA` (entradas, saídas e interseções por ano)
 - [x] Gerar e registrar estatísticas de interseção por `RA` entre anos (contagem absoluta e percentual)
 
-### Fase 4 - Pré-processamento e Engenharia de Features [8/10]
+### Fase 4 - Pré-processamento e Engenharia de Features [9/10]
 - [x] Separar features numéricas e categóricas
 - [x] Tratar valores ausentes (imputação)
 - [x] Codificar variáveis categóricas (`OneHotEncoder` ou similar)
@@ -494,7 +495,7 @@ Nota de coorte temporal:
 - [x] Criar novas features relevantes (se aplicável)
 - [x] Implementar checagem explícita de data leakage (lista negra de colunas futuras + asserts temporais)
 - [x] Remover colunas irrelevantes ou com leakage
-- [ ] Garantir que nenhuma feature use informação futura
+- [x] Garantir que nenhuma feature use informação futura
 - [ ] Documentar as principais decisões de feature engineering
 
 ### Fase 5 - Pipeline, Treinamento e Avaliação [0/17]

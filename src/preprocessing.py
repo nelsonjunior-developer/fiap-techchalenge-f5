@@ -173,7 +173,7 @@ def validate_inference_frame(
         if leakage_report["n_suspect"] > 0:
             suspects = ", ".join(leakage_report["suspect_columns"])
             raise ValueError(
-                f"[{context}] Leakage-like extra columns detected in payload: {suspects}"
+                f"[RAW] leakage-like columns detected: {suspects}"
             )
         if log_extras:
             _logger.info(
@@ -368,6 +368,8 @@ def build_preprocessing_bundle(
             year_t=None,
             year_t1=None,
             include_year_specific=False,
+            context="MODEL",
+            tolerate_structural_missing=True,
         )
         return X_model, feature_report
 
