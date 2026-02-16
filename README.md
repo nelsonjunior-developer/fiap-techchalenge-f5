@@ -479,6 +479,22 @@ Referências:
 - `src/contracts.py`
 - `src/features.py`
 
+## ColumnTransformer para Pré-processamento (Fase 5)
+
+- O núcleo do pré-processamento do modelo é um `ColumnTransformer`, construído por `build_preprocessing_bundle(...)` em `src/preprocessing.py`.
+- Pipeline numérico:
+  - `SimpleImputer(strategy="median", add_indicator=True)`
+  - scaler configurável por `numeric_scaler`: `"none" | "standard" | "robust"`
+- Pipeline categórico:
+  - `SimpleImputer(strategy="most_frequent", add_indicator=True)`
+  - `OneHotEncoder(handle_unknown="ignore")` com fallback explícito no helper `_build_ohe`:
+    - tenta `sparse_output=False` (sklearn mais novo)
+    - se não suportado, usa `sparse=False` (sklearn mais antigo)
+- `Data_Nasc` permanece fora do model frame nesta etapa.
+- Estratégia de scaler:
+  - default do bundle: `"none"` (caminho típico para árvores)
+  - baseline linear: usar `DEFAULT_SCALER_FOR_LINEAR = "standard"` explicitamente.
+
 ## Checklist do Projeto - Datathon Machine Learning Engineering
 
 Este checklist foi elaborado considerando explicitamente as inconsistências reais do dataset fornecido (schemas distintos entre anos, colunas duplicadas, valores inválidos, mudanças semânticas de campos e interseção parcial de estudantes entre períodos). As etapas descritas adotam práticas de Data Engineering e MLOps para garantir robustez, reprodutibilidade e validade estatística do modelo em produção.
@@ -488,7 +504,7 @@ Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 Progresso geral (barra visual):
 `[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`56 de 110 tarefas concluídas (50.9%)`
+`57 de 110 tarefas concluídas (51.8%)`
 
 | Fase | Progresso |
 |---|---|
@@ -496,11 +512,11 @@ Progresso geral (barra visual):
 | Fase 2 - Organização do Projeto e Ambiente | 7/7 |
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 14/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 10/10 |
-| Fase 5 - Pipeline, Treinamento e Avaliação | 0/17 |
+| Fase 5 - Pipeline, Treinamento e Avaliação | 1/17 |
 | Fase 6 - Artefatos, API e Deploy | 0/15 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 2/13 |
 | Fase 8 - Documentação e Entrega Final | 10/21 |
-| Total | 56/110 |
+| Total | 57/110 |
 
 ### Fase 1 - Entendimento do Problema e Target [13/13]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
@@ -561,11 +577,11 @@ Nota de coorte temporal:
 - [x] Garantir que nenhuma feature use informação futura
 - [x] Documentar as principais decisões de feature engineering
 
-### Fase 5 - Pipeline, Treinamento e Avaliação [0/17]
+### Fase 5 - Pipeline, Treinamento e Avaliação [1/17]
 Nota de shift temporal:
 > Antes do treinamento final, é realizada uma análise de shift temporal do target e das features, uma vez que a prevalência da classe positiva varia significativamente entre os períodos analisados (aprox. `61%` para `40%`).
 
-- [ ] Criar `ColumnTransformer` para pré-processamento
+- [x] Criar `ColumnTransformer` para pré-processamento
 - [ ] Encapsular tudo em uma `Pipeline` do scikit-learn
 - [ ] Garantir consistência treino vs inferência
 - [ ] Validar que a pipeline aceita dados crus da API

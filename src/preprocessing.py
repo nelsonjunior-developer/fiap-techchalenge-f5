@@ -100,6 +100,26 @@ def _stable_unique(values: list[str]) -> list[str]:
     return list(dict.fromkeys(values))
 
 
+def _validate_disjoint_feature_families(
+    numeric_cols: list[str],
+    categorical_cols: list[str],
+    datetime_cols: list[str] | None = None,
+) -> None:
+    numeric_set = set(numeric_cols)
+    categorical_set = set(categorical_cols)
+    datetime_set = set(datetime_cols or [])
+    overlap = (
+        (numeric_set & categorical_set)
+        | (numeric_set & datetime_set)
+        | (categorical_set & datetime_set)
+    )
+    if overlap:
+        raise ValueError(
+            "Feature families overlap numeric/categorical/datetime: "
+            f"{sorted(overlap)}"
+        )
+
+
 def get_feature_columns_for_model(
     numeric_cols: list[str] = NUMERIC_COLS,
     categorical_cols: list[str] = CATEGORICAL_COLS,
@@ -184,13 +204,13 @@ def validate_inference_frame(
             )
 
 
-def _build_ohe() -> Any:
-    kwargs: dict[str, Any] = {"handle_unknown": "ignore"}
-    if "sparse_output" in inspect.signature(OneHotEncoder).parameters:
-        kwargs["sparse_output"] = False
-    else:
-        kwargs["sparse"] = False
-    return OneHotEncoder(**kwargs)
+def _build_ohe() -> tuple[Any, str]:
+    kwargs: dict[str, Any] = {"handle_unknown": "ignore", "sparse_output": False}
+    try:
+        return OneHotEncoder(**kwargs), "sparse_output"
+    except TypeError:
+        fallback_kwargs = {"handle_unknown": "ignore", "sparse": False}
+        return OneHotEncoder(**fallback_kwargs), "sparse"
 
 
 def _build_column_transformer_kwargs() -> dict[str, Any]:
@@ -233,15 +253,15 @@ def _expand_model_feature_columns(
     return expanded_numeric, expanded_categorical
 
 
-def build_preprocessor(
-    numeric_cols: list[str] = NUMERIC_COLS,
-    categorical_cols: list[str] = CATEGORICAL_COLS,
+def _build_preprocessor_internal(
+    numeric_cols: list[str],
+    categorical_cols: list[str],
     *,
-    numeric_scaler: str = DEFAULT_SCALER_FOR_TREE,
-    enable_feature_engineering: bool = True,
-    enable_age_bucket: bool = True,
-) -> Any:
-    """Build sklearn ColumnTransformer with imputers + one-hot encoding."""
+    numeric_scaler: str,
+    enable_feature_engineering: bool,
+    enable_age_bucket: bool,
+) -> tuple[Any, str]:
+    """Build sklearn ColumnTransformer and return also OHE sparse flag used."""
     if not _SKLEARN_AVAILABLE:
         raise ImportError(
             "scikit-learn não disponível. Instale as dependências de requirements.txt."
@@ -253,9 +273,11 @@ def build_preprocessor(
         enable_feature_engineering=enable_feature_engineering,
         enable_age_bucket=enable_age_bucket,
     )
-    overlap = sorted(set(numeric) & set(categorical))
-    if overlap:
-        raise ValueError(f"Colunas sobrepostas entre blocos num/cat: {overlap}")
+    _validate_disjoint_feature_families(
+        numeric_cols=numeric,
+        categorical_cols=categorical,
+        datetime_cols=DATETIME_COLS,
+    )
 
     model_feature_cols = get_feature_columns_for_model(numeric, categorical)
     assert_no_pii_in_features(model_feature_cols)
@@ -270,23 +292,44 @@ def build_preprocessor(
     if scaler_transformer is not None:
         numeric_steps.append(("scaler", scaler_transformer))
     numeric_pipeline = Pipeline(steps=numeric_steps)
+    ohe, ohe_sparse_flag_used = _build_ohe()
     categorical_pipeline = Pipeline(
         steps=[
             (
                 "imputer",
                 SimpleImputer(strategy="most_frequent", add_indicator=True),
             ),
-            ("onehot", _build_ohe()),
+            ("onehot", ohe),
         ]
     )
 
-    return ColumnTransformer(
+    preprocessor = ColumnTransformer(
         transformers=[
             ("num", numeric_pipeline, numeric),
             ("cat", categorical_pipeline, categorical),
         ],
         **_build_column_transformer_kwargs(),
     )
+    return preprocessor, ohe_sparse_flag_used
+
+
+def build_preprocessor(
+    numeric_cols: list[str] = NUMERIC_COLS,
+    categorical_cols: list[str] = CATEGORICAL_COLS,
+    *,
+    numeric_scaler: str = DEFAULT_SCALER_FOR_TREE,
+    enable_feature_engineering: bool = True,
+    enable_age_bucket: bool = True,
+) -> Any:
+    """Build sklearn ColumnTransformer with imputers + one-hot encoding."""
+    preprocessor, _ = _build_preprocessor_internal(
+        numeric_cols=numeric_cols,
+        categorical_cols=categorical_cols,
+        numeric_scaler=numeric_scaler,
+        enable_feature_engineering=enable_feature_engineering,
+        enable_age_bucket=enable_age_bucket,
+    )
+    return preprocessor
 
 
 def build_preprocessing_bundle(
@@ -325,7 +368,13 @@ def build_preprocessing_bundle(
         )
         expected_model_cols = list(feature_pruning_plan.get("kept_model_cols", []))
 
-    preprocessor = build_preprocessor(
+    _validate_disjoint_feature_families(
+        numeric_cols=preprocessor_numeric_cols,
+        categorical_cols=preprocessor_categorical_cols,
+        datetime_cols=DATETIME_COLS,
+    )
+
+    preprocessor, ohe_sparse_flag_used = _build_preprocessor_internal(
         numeric_cols=preprocessor_numeric_cols,
         categorical_cols=preprocessor_categorical_cols,
         numeric_scaler=numeric_scaler,
@@ -353,15 +402,14 @@ def build_preprocessing_bundle(
                 enable_age_bucket=enable_age_bucket,
                 strict=strict,
             )
+        missing_model_cols = sorted(set(expected_model_cols) - set(X_model.columns))
+        if missing_model_cols:
+            raise ValueError(
+                f"[{context}] Missing expected model columns: {missing_model_cols}"
+            )
         if feature_pruning_plan is not None:
             X_model = apply_feature_pruning_plan(X_model, feature_pruning_plan)
         else:
-            missing_model_cols = sorted(set(expected_model_cols) - set(X_model.columns))
-            if missing_model_cols:
-                raise ValueError(
-                    f"[{context}] Missing model columns after feature engineering: "
-                    f"{missing_model_cols}"
-                )
             X_model = X_model.loc[:, expected_model_cols].copy()
         assert_no_leakage(
             X_model,
@@ -383,6 +431,17 @@ def build_preprocessing_bundle(
         "enable_feature_engineering": enable_feature_engineering,
         "enable_age_bucket": enable_age_bucket,
         "feature_pruning_plan": feature_pruning_plan,
+        "preprocessing_spec": {
+            "numeric_cols_used": sorted(set(preprocessor_numeric_cols)),
+            "categorical_cols_used": sorted(set(preprocessor_categorical_cols)),
+            "datetime_cols_excluded": sorted(set(DATETIME_COLS)),
+            "scaler_strategy": str(numeric_scaler),
+            "ohe_sparse_flag_used": ohe_sparse_flag_used,
+            "notes": [
+                "SimpleImputer(add_indicator=True) altera a dimensionalidade após fit.",
+                "OneHotEncoder(handle_unknown='ignore') evita quebra por categorias novas.",
+            ],
+        },
         "transform_raw_to_model_frame": transform_raw_to_model_frame,
     }
 
