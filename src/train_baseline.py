@@ -26,9 +26,11 @@ from src.preprocessing import (
 )
 from src.metrics import (
     build_default_prediction_policy,
+    compute_classification_metrics_at_threshold,
     compute_metrics_threshold,
     compute_metrics_topk,
     compute_prevalence,
+    summarize_proba,
     select_threshold_for_target_recall,
 )
 from src.train_pipeline import build_model_pipeline
@@ -114,14 +116,38 @@ def _validate_training_inputs(X_train: pd.DataFrame, y_train: pd.Series) -> None
         raise ValueError(f"Target is not binary: {sorted(unique_values)}")
 
 
-def _compute_probability_summary(scores: np.ndarray) -> dict[str, float]:
+def _build_evaluation_block(
+    *,
+    pair: str,
+    y_true: pd.Series,
+    scores: np.ndarray,
+    threshold: float = 0.5,
+    extra_notes: list[str] | None = None,
+) -> dict[str, Any]:
+    payload = compute_classification_metrics_at_threshold(
+        y_true,
+        scores,
+        threshold=threshold,
+    )
+    notes = list(payload.get("notes", []))
+    if extra_notes:
+        notes.extend(extra_notes)
     return {
-        "min": float(np.min(scores)),
-        "mean": float(np.mean(scores)),
-        "max": float(np.max(scores)),
-        "p05": float(np.quantile(scores, 0.05)),
-        "p50": float(np.quantile(scores, 0.50)),
-        "p95": float(np.quantile(scores, 0.95)),
+        "pair": pair,
+        "threshold": float(threshold),
+        "n": int(payload["n"]),
+        "n_pos": int(payload["n_pos"]),
+        "prevalence": float(payload["prevalence"]),
+        "metrics": {
+            "recall": float(payload["recall"]),
+            "precision": float(payload["precision"]),
+            "f1": float(payload["f1"]),
+            "roc_auc": payload["roc_auc"],
+            "pr_auc": payload["pr_auc"],
+            "positive_rate": float(payload["positive_rate"]),
+        },
+        "pred_proba_summary": summarize_proba(scores),
+        "notes": notes,
     }
 
 
@@ -132,20 +158,15 @@ def _build_holdout_evaluation(
 ) -> dict[str, Any] | None:
     if y_holdout is None or scores_holdout is None:
         return None
-    prevalence = compute_prevalence(y_holdout)
-    metrics = compute_metrics_threshold(y_holdout, scores_holdout, threshold=0.5)
-    return {
-        "pair": "2023->2024",
-        "n": int(prevalence["n"]),
-        "n_pos": int(prevalence["n_pos"]),
-        "prevalence": float(prevalence["prevalence"]),
-        "threshold": 0.5,
-        "metrics": metrics,
-        "pred_proba_summary": _compute_probability_summary(scores_holdout),
-        "notes": [
+    return _build_evaluation_block(
+        pair="2023->2024",
+        y_true=y_holdout,
+        scores=scores_holdout,
+        threshold=0.5,
+        extra_notes=[
             "holdout evaluation is read-only; model was not fitted on holdout data",
         ],
-    }
+    )
 
 
 def _build_metadata_payload(
@@ -162,8 +183,7 @@ def _build_metadata_payload(
     dataset_sha256: str | None,
     n_samples_train: int,
     y_prevalence: float,
-    probability_summary: dict[str, float],
-    metrics_train_at_05: dict[str, float | int | None],
+    evaluation_train: dict[str, Any],
     sklearn_version: str,
     class_imbalance_strategy: dict[str, Any],
     prediction_policy: dict[str, Any],
@@ -189,13 +209,14 @@ def _build_metadata_payload(
         "dataset_sha256": dataset_sha256,
         "n_samples_train": n_samples_train,
         "y_prevalence": y_prevalence,
-        "train_pred_proba_summary": probability_summary,
-        "metrics_train_at_0.5": metrics_train_at_05,
+        "train_pred_proba_summary": evaluation_train["pred_proba_summary"],
+        "metrics_train_at_0.5": evaluation_train["metrics"],
         "metrics_holdout_at_0.5": (
             evaluation_holdout.get("metrics")
             if isinstance(evaluation_holdout, dict)
             else None
         ),
+        "evaluation_train": evaluation_train,
         "evaluation_holdout": evaluation_holdout,
         "class_imbalance_strategy": class_imbalance_strategy,
         "prediction_policy": prediction_policy,
@@ -467,9 +488,16 @@ def run_baseline_training(
                 y_holdout=y_holdout,
                 scores_holdout=holdout_scores,
             )
-
-            probability_summary = _compute_probability_summary(scores)
-            metrics_at_05 = compute_metrics_threshold(y_train, scores, threshold=0.5)
+            evaluation_train = _build_evaluation_block(
+                pair=f"{year_t}->{year_t1}",
+                y_true=y_train,
+                scores=scores,
+                threshold=0.5,
+                extra_notes=[
+                    "train-only metrics computed on the same data used for fit",
+                ],
+            )
+            metrics_at_05 = evaluation_train["metrics"]
 
             variant_dir = base_output_dir / variant
             variant_dir.mkdir(parents=True, exist_ok=True)
@@ -491,8 +519,7 @@ def run_baseline_training(
                 "dataset_sha256": dataset_sha256,
                 "n_samples_train": int(len(y_train)),
                 "y_prevalence": float(np.mean(y_train.astype(int).to_numpy())),
-                "probability_summary": probability_summary,
-                "metrics_train_at_05": metrics_at_05,
+                "evaluation_train": evaluation_train,
                 "sklearn_version": str(deps["sklearn_version"]),
             }
 
@@ -584,8 +611,7 @@ def run_baseline_training(
             dataset_sha256=base_payload["dataset_sha256"],
             n_samples_train=base_payload["n_samples_train"],
             y_prevalence=base_payload["y_prevalence"],
-            probability_summary=base_payload["probability_summary"],
-            metrics_train_at_05=base_payload["metrics_train_at_05"],
+            evaluation_train=base_payload["evaluation_train"],
             sklearn_version=base_payload["sklearn_version"],
             class_imbalance_strategy=strategy_block,
             prediction_policy=prediction_policy,

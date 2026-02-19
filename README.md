@@ -593,6 +593,15 @@ Referências:
   - `python -m src.evaluate_holdout --models-root artifacts/models --dataset-path <xlsx> --output artifacts/holdout_evaluation.json`
   - o comando carrega `model.joblib` e avalia no holdout oficial sem refit.
 
+## Métricas Oficiais (Fase 5)
+
+- O cálculo oficial de métricas está centralizado em `src/metrics.py`, evitando lógica duplicada entre CLIs.
+- Nesta fase, o threshold padrão é `0.5` (ajuste operacional de threshold é tarefa separada).
+- Cada `metadata.json` salva:
+  - `evaluation_train` (pair `2022->2023`)
+  - `evaluation_holdout` (pair `2023->2024`, quando `--eval-holdout 1`)
+  - bloco de métricas com `Recall`, `Precision`, `F1`, `ROC-AUC`, `PR-AUC` e `positive_rate`.
+
 ## Checklist do Projeto - Datathon Machine Learning Engineering
 
 Este checklist foi elaborado considerando explicitamente as inconsistências reais do dataset fornecido (schemas distintos entre anos, colunas duplicadas, valores inválidos, mudanças semânticas de campos e interseção parcial de estudantes entre períodos). As etapas descritas adotam práticas de Data Engineering e MLOps para garantir robustez, reprodutibilidade e validade estatística do modelo em produção.
@@ -602,7 +611,7 @@ Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 Progresso geral (barra visual):
 `[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`67 de 110 tarefas concluídas (60.9%)`
+`68 de 110 tarefas concluídas (61.8%)`
 
 | Fase | Progresso |
 |---|---|
@@ -610,11 +619,11 @@ Progresso geral (barra visual):
 | Fase 2 - Organização do Projeto e Ambiente | 7/7 |
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 14/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 10/10 |
-| Fase 5 - Pipeline, Treinamento e Avaliação | 11/17 |
+| Fase 5 - Pipeline, Treinamento e Avaliação | 12/17 |
 | Fase 6 - Artefatos, API e Deploy | 0/15 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 2/13 |
 | Fase 8 - Documentação e Entrega Final | 10/21 |
-| Total | 67/110 |
+| Total | 68/110 |
 
 ### Fase 1 - Entendimento do Problema e Target [13/13]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
@@ -675,7 +684,7 @@ Nota de coorte temporal:
 - [x] Garantir que nenhuma feature use informação futura
 - [x] Documentar as principais decisões de feature engineering
 
-### Fase 5 - Pipeline, Treinamento e Avaliação [11/17]
+### Fase 5 - Pipeline, Treinamento e Avaliação [12/17]
 Nota de shift temporal:
 > Antes do treinamento final, é realizada uma análise de shift temporal do target e das features, uma vez que a prevalência da classe positiva varia significativamente entre os períodos analisados (aprox. `61%` para `40%`).
 
@@ -690,7 +699,7 @@ Nota de shift temporal:
 - [x] Definir estratégia explícita para desbalanceamento de classes (`class_weight`, ajuste de threshold ou decisão justificada de não tratar)
 - [x] Comparar modelos com foco em Recall e PR-AUC
 - [x] Avaliar desempenho no holdout temporal (`2023 -> 2024`)
-- [ ] Calcular métricas: Recall, Precision, F1-score, ROC-AUC, PR-AUC
+- [x] Calcular métricas: Recall, Precision, F1-score, ROC-AUC, PR-AUC
 - [ ] Gerar matriz de confusão
 - [ ] Definir threshold operacional focado em Recall
 - [ ] Definir critério objetivo formal de seleção do modelo final (ex.: maior Recall com PR-AUC acima de limiar mínimo)

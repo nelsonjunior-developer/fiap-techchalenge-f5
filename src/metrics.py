@@ -78,30 +78,108 @@ def _pr_auc_safe(y_true: np.ndarray, y_score: np.ndarray) -> float | None:
     return float(ap)
 
 
+def summarize_proba(y_proba: pd.Series | np.ndarray) -> dict[str, float]:
+    """Return privacy-safe aggregated score summary."""
+    scores = np.asarray(y_proba, dtype=float)
+    if scores.size == 0:
+        return {
+            "min": 0.0,
+            "mean": 0.0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0.0,
+        }
+    return {
+        "min": float(np.min(scores)),
+        "mean": float(np.mean(scores)),
+        "p50": float(np.quantile(scores, 0.50)),
+        "p95": float(np.quantile(scores, 0.95)),
+        "max": float(np.max(scores)),
+    }
+
+
+def compute_classification_metrics_at_threshold(
+    y_true: pd.Series | np.ndarray,
+    y_proba: pd.Series | np.ndarray,
+    threshold: float = 0.5,
+) -> dict[str, Any]:
+    """Compute threshold metrics and dataset prevalence in a single payload.
+
+    Returns only aggregate values (privacy-safe).
+    """
+    y = pd.Series(y_true).astype("Int64").to_numpy()
+    scores = np.asarray(y_proba, dtype=float)
+    if len(y) != len(scores):
+        raise ValueError("y_true and y_proba must have same length.")
+
+    n = int(len(y))
+    notes: list[str] = []
+    if n == 0:
+        notes.append("empty_input")
+        return {
+            "threshold": float(threshold),
+            "recall": 0.0,
+            "precision": 0.0,
+            "f1": 0.0,
+            "roc_auc": None,
+            "pr_auc": None,
+            "positive_rate": 0.0,
+            "n": 0,
+            "n_pos": 0,
+            "prevalence": 0.0,
+            "notes": notes,
+        }
+
+    unique_values = set(pd.Series(y).dropna().astype(int).unique().tolist())
+    if not unique_values.issubset({0, 1}):
+        raise ValueError(f"y_true must be binary (0/1). Got values: {sorted(unique_values)}")
+
+    y_pred = (scores >= float(threshold)).astype(int)
+    precision, recall, f1 = _binary_precision_recall_f1(y.astype(int), y_pred)
+    prevalence_info = compute_prevalence(y.astype(int))
+
+    roc_auc = _roc_auc_safe(y.astype(int), scores)
+    pr_auc = _pr_auc_safe(y.astype(int), scores)
+    if len(unique_values) <= 1:
+        roc_auc = None
+        pr_auc = None
+        notes.append("single_class_target")
+
+    return {
+        "threshold": float(threshold),
+        "recall": float(recall),
+        "precision": float(precision),
+        "f1": float(f1),
+        "roc_auc": None if roc_auc is None else float(roc_auc),
+        "pr_auc": None if pr_auc is None else float(pr_auc),
+        "positive_rate": float(np.mean(y_pred)),
+        "n": int(prevalence_info["n"]),
+        "n_pos": int(prevalence_info["n_pos"]),
+        "prevalence": float(prevalence_info["prevalence"]),
+        "notes": notes,
+    }
+
+
 def compute_metrics_threshold(
     y_true: pd.Series | np.ndarray,
     y_score: np.ndarray,
     *,
     threshold: float = 0.5,
 ) -> dict[str, float | None]:
-    """Compute aggregated binary metrics for a fixed decision threshold."""
-    y = pd.Series(y_true).astype(int).to_numpy()
-    scores = np.asarray(y_score, dtype=float)
-    if len(y) != len(scores):
-        raise ValueError("y_true and y_score must have same length.")
-    if len(y) == 0:
-        raise ValueError("Empty inputs are not allowed.")
-
-    y_pred = (scores >= float(threshold)).astype(int)
-    precision, recall, f1 = _binary_precision_recall_f1(y, y_pred)
+    """Backward-compatible threshold metrics payload used across project."""
+    payload = compute_classification_metrics_at_threshold(
+        y_true,
+        y_score,
+        threshold=threshold,
+    )
     return {
-        "threshold": float(threshold),
-        "recall": float(recall),
-        "precision": float(precision),
-        "f1": float(f1),
-        "roc_auc": _roc_auc_safe(y, scores),
-        "pr_auc": _pr_auc_safe(y, scores),
-        "positive_rate_at_threshold": float(np.mean(y_pred)),
+        "threshold": float(payload["threshold"]),
+        "recall": float(payload["recall"]),
+        "precision": float(payload["precision"]),
+        "f1": float(payload["f1"]),
+        "roc_auc": payload["roc_auc"],
+        "pr_auc": payload["pr_auc"],
+        "positive_rate_at_threshold": float(payload["positive_rate"]),
     }
 
 

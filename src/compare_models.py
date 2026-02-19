@@ -58,6 +58,8 @@ def _normalize_metrics_block(raw_block: dict[str, Any] | None) -> dict[str, floa
     positive_rate = raw_block.get("positive_rate_at_threshold")
     if positive_rate is None:
         positive_rate = raw_block.get("positive_rate_at_0.5")
+    if positive_rate is None:
+        positive_rate = raw_block.get("positive_rate")
     return {
         "recall_at_0.5": _to_float_or_none(raw_block.get("recall")),
         "precision_at_0.5": _to_float_or_none(raw_block.get("precision")),
@@ -66,6 +68,30 @@ def _normalize_metrics_block(raw_block: dict[str, Any] | None) -> dict[str, floa
         "pr_auc": _to_float_or_none(raw_block.get("pr_auc")),
         "positive_rate_at_0.5": _to_float_or_none(positive_rate),
     }
+
+
+def _extract_train_metrics(metadata: dict[str, Any]) -> tuple[dict[str, float | None] | None, list[str]]:
+    warnings: list[str] = []
+    evaluation_train = metadata.get("evaluation_train")
+    if isinstance(evaluation_train, dict):
+        normalized = _normalize_metrics_block(
+            evaluation_train.get("metrics")
+            if isinstance(evaluation_train.get("metrics"), dict)
+            else None
+        )
+        if normalized is not None:
+            return normalized, warnings
+
+    direct = _normalize_metrics_block(
+        metadata.get("metrics_train_at_0.5")
+        if isinstance(metadata.get("metrics_train_at_0.5"), dict)
+        else None
+    )
+    if direct is not None:
+        return direct, warnings
+
+    warnings.append("metrics_train_at_0.5/evaluation_train.metrics missing in metadata.")
+    return None, warnings
 
 
 def _extract_holdout_metrics(
@@ -112,7 +138,7 @@ def _extract_holdout_metrics(
                 return normalized, warnings
 
     warnings.append(
-        f"Missing holdout metrics for variant={variant}; expected metrics_holdout_at_0.5 or class_imbalance_strategy.evidence.by_variant_threshold_0.5.{variant}.holdout"
+        f"Missing holdout metrics for variant={variant}; expected evaluation_holdout.metrics or metrics_holdout_at_0.5 or class_imbalance_strategy.evidence.by_variant_threshold_0.5.{variant}.holdout"
     )
     return None, warnings
 
@@ -193,11 +219,9 @@ def build_comparison_report(
             row_notes.append("train_pair missing or invalid in metadata.")
 
         holdout_pair = f"{OFFICIAL_HOLDOUT_PAIR[0]}->{OFFICIAL_HOLDOUT_PAIR[1]}"
-        train_metrics = _normalize_metrics_block(
-            metadata.get("metrics_train_at_0.5")
-            if isinstance(metadata.get("metrics_train_at_0.5"), dict)
-            else None
-        )
+        train_metrics, train_warnings = _extract_train_metrics(metadata)
+        row_notes.extend(train_warnings)
+        warnings.extend([f"{model_family}/{variant}: {message}" for message in train_warnings])
         if train_metrics is None:
             train_metrics = {
                 "recall_at_0.5": None,
@@ -207,7 +231,6 @@ def build_comparison_report(
                 "pr_auc": None,
                 "positive_rate_at_0.5": None,
             }
-            row_notes.append("metrics_train_at_0.5 missing in metadata.")
 
         holdout_metrics, holdout_warnings = _extract_holdout_metrics(
             metadata,

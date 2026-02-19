@@ -30,6 +30,52 @@ def _write_metadata(
         "model_kind": "dummy",
         "variant": variant,
         "train_pair": {"year_t": 2022, "year_t1": 2023},
+        "evaluation_train": {
+            "pair": "2022->2023",
+            "threshold": 0.5,
+            "n": 100,
+            "n_pos": 40,
+            "prevalence": 0.4,
+            "metrics": {
+                "recall": train_recall,
+                "precision": 0.5,
+                "f1": 0.5,
+                "roc_auc": 0.6,
+                "pr_auc": train_pr_auc,
+                "positive_rate": 0.4,
+            },
+            "pred_proba_summary": {"min": 0.1, "mean": 0.5, "p50": 0.5, "p95": 0.9, "max": 0.99},
+            "notes": [],
+        },
+        "evaluation_holdout": (
+            None
+            if holdout_recall is None
+            else {
+                "pair": "2023->2024",
+                "threshold": 0.5,
+                "n": 100,
+                "n_pos": 40,
+                "prevalence": 0.4,
+                "metrics": {
+                    "recall": holdout_recall,
+                    "precision": 0.5,
+                    "f1": 0.5,
+                    "roc_auc": 0.6,
+                    "pr_auc": holdout_pr_auc,
+                    "positive_rate": holdout_pos_rate
+                    if holdout_pos_rate is not None
+                    else 0.4,
+                },
+                "pred_proba_summary": {
+                    "min": 0.1,
+                    "mean": 0.5,
+                    "p50": 0.5,
+                    "p95": 0.9,
+                    "max": 0.99,
+                },
+                "notes": [],
+            }
+        ),
         "metrics_train_at_0.5": {
             "recall": train_recall,
             "precision": 0.5,
@@ -119,6 +165,19 @@ def test_discovery_and_parse_reads_legacy_holdout_path(tmp_path: Path) -> None:
     report = build_comparison_report(models_root=models_root)
     assert len(report["rows"]) == 4
     assert report["status"] in {"PASS", "WARNING"}
+
+
+def test_parse_uses_new_evaluation_paths_when_available(tmp_path: Path) -> None:
+    models_root = tmp_path / "artifacts" / "models"
+    _build_fake_tree(models_root)
+    report = build_comparison_report(models_root=models_root)
+    row = next(
+        item
+        for item in report["rows"]
+        if item["model_family"] == "baseline_logreg" and item["variant"] == "none"
+    )
+    assert row["metrics"]["train"]["recall_at_0.5"] == pytest.approx(0.90)
+    assert row["metrics"]["holdout"]["recall_at_0.5"] == pytest.approx(0.51)
 
 
 def test_ranking_policy_recall_then_pr_auc(tmp_path: Path) -> None:

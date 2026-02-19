@@ -169,6 +169,8 @@ def test_train_hgb_saves_artifacts_and_metadata_without_pii(
     assert forbidden_keys.isdisjoint(payload.keys())
     assert "class_imbalance_strategy" in payload
     assert "prediction_policy" in payload
+    assert isinstance(payload.get("evaluation_train"), dict)
+    assert payload.get("evaluation_holdout") is None
 
     loaded = _FakeJoblib.load(model_path)
     sample_raw = fake_frames[2022].loc[:, prep.get_expected_raw_feature_columns()].head(3)
