@@ -83,6 +83,16 @@ def _extract_holdout_metrics(
     if direct is not None:
         return direct, warnings
 
+    evaluation_holdout = metadata.get("evaluation_holdout")
+    if isinstance(evaluation_holdout, dict):
+        eval_metrics = _normalize_metrics_block(
+            evaluation_holdout.get("metrics")
+            if isinstance(evaluation_holdout.get("metrics"), dict)
+            else None
+        )
+        if eval_metrics is not None:
+            return eval_metrics, warnings
+
     evidence = (
         metadata.get("class_imbalance_strategy", {})
         if isinstance(metadata.get("class_imbalance_strategy"), dict)

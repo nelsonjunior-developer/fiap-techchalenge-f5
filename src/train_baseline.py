@@ -33,6 +33,7 @@ from src.metrics import (
 )
 from src.train_pipeline import build_model_pipeline
 from src.training_policy import OFFICIAL_TRAIN_PAIR, enforce_official_train_pair
+from src.training_utils import build_raw_from_ids
 from src.utils import get_logger, setup_logging
 
 _logger = get_logger(__name__)
@@ -100,19 +101,6 @@ def _hash_pruning_plan(plan: dict[str, Any]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _build_raw_from_ids(
-    df_t: pd.DataFrame,
-    ids: pd.Series,
-    expected_raw_cols: list[str],
-) -> pd.DataFrame:
-    ids_df = pd.DataFrame({"RA": ids.astype("string")})
-    raw_df = ids_df.merge(df_t, on="RA", how="left")
-    missing_cols = sorted(set(expected_raw_cols) - set(raw_df.columns))
-    if missing_cols:
-        raise ValueError(f"Raw training frame missing expected columns: {missing_cols}")
-    return raw_df.loc[:, expected_raw_cols].copy()
-
-
 def _validate_training_inputs(X_train: pd.DataFrame, y_train: pd.Series) -> None:
     if X_train.empty:
         raise ValueError("X_train is empty.")
@@ -137,6 +125,29 @@ def _compute_probability_summary(scores: np.ndarray) -> dict[str, float]:
     }
 
 
+def _build_holdout_evaluation(
+    *,
+    y_holdout: pd.Series | None,
+    scores_holdout: np.ndarray | None,
+) -> dict[str, Any] | None:
+    if y_holdout is None or scores_holdout is None:
+        return None
+    prevalence = compute_prevalence(y_holdout)
+    metrics = compute_metrics_threshold(y_holdout, scores_holdout, threshold=0.5)
+    return {
+        "pair": "2023->2024",
+        "n": int(prevalence["n"]),
+        "n_pos": int(prevalence["n_pos"]),
+        "prevalence": float(prevalence["prevalence"]),
+        "threshold": 0.5,
+        "metrics": metrics,
+        "pred_proba_summary": _compute_probability_summary(scores_holdout),
+        "notes": [
+            "holdout evaluation is read-only; model was not fitted on holdout data",
+        ],
+    }
+
+
 def _build_metadata_payload(
     *,
     variant: str,
@@ -156,8 +167,15 @@ def _build_metadata_payload(
     sklearn_version: str,
     class_imbalance_strategy: dict[str, Any],
     prediction_policy: dict[str, Any],
+    evaluation_holdout: dict[str, Any] | None,
     cv_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    notes = [
+        "threshold tuning is a later task",
+        "holdout evaluation is read-only (no fitting on 2023->2024)",
+    ]
+    if evaluation_holdout is None:
+        notes.append("holdout evaluation disabled by flag")
     payload = {
         "model_kind": "LogisticRegression",
         "variant": variant,
@@ -173,6 +191,12 @@ def _build_metadata_payload(
         "y_prevalence": y_prevalence,
         "train_pred_proba_summary": probability_summary,
         "metrics_train_at_0.5": metrics_train_at_05,
+        "metrics_holdout_at_0.5": (
+            evaluation_holdout.get("metrics")
+            if isinstance(evaluation_holdout, dict)
+            else None
+        ),
+        "evaluation_holdout": evaluation_holdout,
         "class_imbalance_strategy": class_imbalance_strategy,
         "prediction_policy": prediction_policy,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -181,10 +205,7 @@ def _build_metadata_payload(
             "pandas": pd.__version__,
             "sklearn": sklearn_version,
         },
-        "notes": [
-            "train-only metrics (no temporal holdout here)",
-            "threshold tuning is a later task",
-        ],
+        "notes": notes,
     }
     forbidden_present = _FORBIDDEN_METADATA_KEYS & set(payload.keys())
     if forbidden_present:
@@ -365,7 +386,7 @@ def run_baseline_training(
         enable_age_bucket=enable_age_bucket,
     )
     expected_raw_cols = list(raw_bundle["expected_raw_cols"])
-    X_raw_train = _build_raw_from_ids(yearly_frames[year_t], ids, expected_raw_cols)
+    X_raw_train = build_raw_from_ids(yearly_frames[year_t], ids, expected_raw_cols)
     if len(X_raw_train) != len(y_train):
         raise ValueError("Inconsistent training rows between X_raw_train and y_train.")
 
@@ -380,7 +401,7 @@ def run_baseline_training(
             2023,
             2024,
         )
-        X_raw_holdout = _build_raw_from_ids(
+        X_raw_holdout = build_raw_from_ids(
             yearly_frames[2023],
             ids_holdout,
             expected_raw_cols,
@@ -409,6 +430,7 @@ def run_baseline_training(
     class_weight_by_variant: dict[str, str] = {}
     metadata_payload_by_variant: dict[str, dict[str, Any]] = {}
     metadata_path_by_variant: dict[str, Path] = {}
+    evaluation_holdout_by_variant: dict[str, dict[str, Any] | None] = {}
 
     for variant in variants_list:
         class_weight: str | None = None if variant == "none" else "balanced"
@@ -441,6 +463,10 @@ def run_baseline_training(
             variant_scores_train[variant] = scores
             variant_scores_holdout[variant] = holdout_scores
             class_weight_by_variant[variant] = "none" if class_weight is None else str(class_weight)
+            evaluation_holdout_by_variant[variant] = _build_holdout_evaluation(
+                y_holdout=y_holdout,
+                scores_holdout=holdout_scores,
+            )
 
             probability_summary = _compute_probability_summary(scores)
             metrics_at_05 = compute_metrics_threshold(y_train, scores, threshold=0.5)
@@ -563,6 +589,7 @@ def run_baseline_training(
             sklearn_version=base_payload["sklearn_version"],
             class_imbalance_strategy=strategy_block,
             prediction_policy=prediction_policy,
+            evaluation_holdout=evaluation_holdout_by_variant.get(variant),
             cv_result=cv_payload_by_variant.get(variant),
         )
         metadata_path = metadata_path_by_variant[variant]
