@@ -555,6 +555,25 @@ Referências:
   - `artifacts/models/nonlinear_hgb/<variant>/model.joblib`
   - `artifacts/models/nonlinear_hgb/<variant>/metadata.json`
 
+## Estratégia de Decisão e Desbalanceamento (Fase 5)
+
+- Prevalência observada no pipeline oficial:
+  - treino `2022->2023`: `n=600`, `n_pos=366`, prevalência `0.6100`
+  - holdout `2023->2024`: `n=765`, `n_pos=308`, prevalência `0.4026`
+- Decisão operacional padrão:
+  - `class_weight=none` como default de treino
+  - política de decisão padrão: `top_k` com `k_frac=0.10` (alternativa documentada: `0.20`)
+  - `threshold=0.50` mantido como alternativa para comparabilidade
+- Justificativa:
+  - no cenário atual, `class_weight="balanced"` piorou Recall no holdout em relação a `class_weight=none`.
+  - otimização de threshold no treino não generalizou melhor no holdout.
+  - como a intervenção é limitada por capacidade, ranking `top-k` é mais acionável que um threshold fixo.
+- Implementação:
+  - utilitários agregados em `src/metrics.py` (`threshold` e `top-k`), sem persistir scores/IDs.
+  - `metadata.json` dos modelos inclui:
+    - `class_imbalance_strategy` (prevalência, decisão, alternativas e evidências agregadas)
+    - `prediction_policy` (config padrão consumível pela camada de serviço da API)
+
 ## Checklist do Projeto - Datathon Machine Learning Engineering
 
 Este checklist foi elaborado considerando explicitamente as inconsistências reais do dataset fornecido (schemas distintos entre anos, colunas duplicadas, valores inválidos, mudanças semânticas de campos e interseção parcial de estudantes entre períodos). As etapas descritas adotam práticas de Data Engineering e MLOps para garantir robustez, reprodutibilidade e validade estatística do modelo em produção.
@@ -564,7 +583,7 @@ Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 Progresso geral (barra visual):
 `[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`64 de 110 tarefas concluídas (58.2%)`
+`65 de 110 tarefas concluídas (59.1%)`
 
 | Fase | Progresso |
 |---|---|
@@ -572,11 +591,11 @@ Progresso geral (barra visual):
 | Fase 2 - Organização do Projeto e Ambiente | 7/7 |
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 14/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 10/10 |
-| Fase 5 - Pipeline, Treinamento e Avaliação | 8/17 |
+| Fase 5 - Pipeline, Treinamento e Avaliação | 9/17 |
 | Fase 6 - Artefatos, API e Deploy | 0/15 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 2/13 |
 | Fase 8 - Documentação e Entrega Final | 10/21 |
-| Total | 64/110 |
+| Total | 65/110 |
 
 ### Fase 1 - Entendimento do Problema e Target [13/13]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
@@ -637,7 +656,7 @@ Nota de coorte temporal:
 - [x] Garantir que nenhuma feature use informação futura
 - [x] Documentar as principais decisões de feature engineering
 
-### Fase 5 - Pipeline, Treinamento e Avaliação [8/17]
+### Fase 5 - Pipeline, Treinamento e Avaliação [9/17]
 Nota de shift temporal:
 > Antes do treinamento final, é realizada uma análise de shift temporal do target e das features, uma vez que a prevalência da classe positiva varia significativamente entre os períodos analisados (aprox. `61%` para `40%`).
 
@@ -649,7 +668,7 @@ Nota de shift temporal:
 - [x] Treinar modelo não-linear (ex.: `HistGradientBoosting`)
 - [x] Usar apenas dados de treino (`2022 -> 2023`)
 - [x] (Opcional) Validação interna (CV estratificada)
-- [ ] Definir estratégia explícita para desbalanceamento de classes (`class_weight`, ajuste de threshold ou decisão justificada de não tratar)
+- [x] Definir estratégia explícita para desbalanceamento de classes (`class_weight`, ajuste de threshold ou decisão justificada de não tratar)
 - [ ] Comparar modelos com foco em Recall e PR-AUC
 - [ ] Avaliar desempenho no holdout temporal (`2023 -> 2024`)
 - [ ] Calcular métricas: Recall, Precision, F1-score, ROC-AUC, PR-AUC

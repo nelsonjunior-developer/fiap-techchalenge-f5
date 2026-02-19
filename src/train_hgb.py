@@ -9,7 +9,7 @@ import json
 import platform
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -25,6 +25,12 @@ from src.preprocessing import (
     build_preprocessing_bundle,
     build_pruning_plan_from_training_frame,
 )
+from src.metrics import (
+    build_default_prediction_policy,
+    compute_metrics_threshold,
+    compute_metrics_topk,
+    compute_prevalence,
+)
 from src.train_pipeline import build_model_pipeline
 from src.training_policy import OFFICIAL_TRAIN_PAIR, enforce_official_train_pair
 from src.utils import get_logger, setup_logging
@@ -39,13 +45,6 @@ def _require_training_dependencies() -> dict[str, Any]:
         import joblib
         import sklearn
         from sklearn.ensemble import HistGradientBoostingClassifier
-        from sklearn.metrics import (
-            average_precision_score,
-            f1_score,
-            precision_score,
-            recall_score,
-            roc_auc_score,
-        )
     except ModuleNotFoundError as exc:  # pragma: no cover - environment dependent
         raise RuntimeError(
             "scikit-learn/joblib is required to train nonlinear model. Install requirements-dev.txt"
@@ -55,11 +54,6 @@ def _require_training_dependencies() -> dict[str, Any]:
         "joblib": joblib,
         "sklearn_version": sklearn.__version__,
         "HistGradientBoostingClassifier": HistGradientBoostingClassifier,
-        "average_precision_score": average_precision_score,
-        "f1_score": f1_score,
-        "precision_score": precision_score,
-        "recall_score": recall_score,
-        "roc_auc_score": roc_auc_score,
     }
 
 
@@ -137,13 +131,6 @@ def _validate_training_inputs(
         raise ValueError(f"Target is not binary: {sorted(unique_values)}")
 
 
-def _safe_metric(metric_fn: Callable[..., float], *args: Any, **kwargs: Any) -> float | None:
-    try:
-        return float(metric_fn(*args, **kwargs))
-    except ValueError:
-        return None
-
-
 def _compute_probability_summary(scores: np.ndarray) -> dict[str, float]:
     return {
         "mean": float(np.mean(scores)),
@@ -200,8 +187,10 @@ def _build_metadata_payload(
     n_samples_train: int,
     y_prevalence: float,
     probability_summary: dict[str, float],
-    metrics_train_at_05: dict[str, float | None],
+    metrics_train_at_05: dict[str, float | int | None],
     sklearn_version: str,
+    class_imbalance_strategy: dict[str, Any],
+    prediction_policy: dict[str, Any],
     cv_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     notes = ["train-only metrics; holdout eval is a later task"]
@@ -223,6 +212,8 @@ def _build_metadata_payload(
         "y_prevalence": y_prevalence,
         "train_pred_proba_summary": probability_summary,
         "metrics_train_at_0.5": metrics_train_at_05,
+        "class_imbalance_strategy": class_imbalance_strategy,
+        "prediction_policy": prediction_policy,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "versions": {
             "python": platform.python_version(),
@@ -239,6 +230,67 @@ def _build_metadata_payload(
     return payload
 
 
+def _build_class_imbalance_strategy(
+    *,
+    y_train: pd.Series,
+    y_holdout: pd.Series | None,
+    variant_scores_train: dict[str, np.ndarray],
+    variant_scores_holdout: dict[str, np.ndarray | None],
+) -> dict[str, Any]:
+    train_prev = compute_prevalence(y_train)
+    hold_prev = compute_prevalence(y_holdout) if y_holdout is not None else None
+    by_variant_threshold_05: dict[str, Any] = {}
+    for variant, train_scores in variant_scores_train.items():
+        hold_scores = variant_scores_holdout.get(variant)
+        by_variant_threshold_05[variant] = {
+            "train": compute_metrics_threshold(y_train, train_scores, threshold=0.5),
+            "holdout": (
+                compute_metrics_threshold(y_holdout, hold_scores, threshold=0.5)
+                if (y_holdout is not None and hold_scores is not None)
+                else None
+            ),
+        }
+
+    topk_on_holdout: dict[str, Any] | None = None
+    reference_variant = next(
+        (variant for variant, scores in variant_scores_holdout.items() if scores is not None),
+        None,
+    )
+    if y_holdout is not None and reference_variant is not None:
+        ref_scores = variant_scores_holdout[reference_variant]
+        topk_on_holdout = {
+            "reference_variant": reference_variant,
+            "topk_10pct": compute_metrics_topk(y_holdout, ref_scores, k_frac=0.10),
+            "topk_20pct": compute_metrics_topk(y_holdout, ref_scores, k_frac=0.20),
+        }
+
+    notes = [
+        "class_weight tuning is not applicable to HistGradientBoostingClassifier in this setup.",
+        "Top-k is default policy for operational capacity planning; threshold=0.5 kept for comparability.",
+    ]
+    if hold_prev is None:
+        notes.append("Holdout prevalence and holdout evidence are null because holdout evaluation was disabled.")
+
+    return {
+        "train_prevalence": train_prev["prevalence"],
+        "holdout_prevalence": None if hold_prev is None else hold_prev["prevalence"],
+        "default": {"kind": "top_k", "k_frac": 0.10},
+        "alternatives": [
+            {"kind": "top_k", "k_frac": 0.20},
+            {"kind": "threshold", "threshold": 0.50},
+        ],
+        "class_weight_tested": [],
+        "decision": (
+            "class_weight is not used; keep model probability output and apply top-k by capacity."
+        ),
+        "evidence": {
+            "by_variant_threshold_0.5": by_variant_threshold_05,
+            "topk_holdout": topk_on_holdout,
+        },
+        "notes": notes,
+    }
+
+
 def run_hgb_training(
     *,
     file_path: str | Path | None = None,
@@ -250,6 +302,7 @@ def run_hgb_training(
     enable_age_bucket: bool = False,
     allow_nontrain_pair: bool = False,
     allow_holdout_training: bool = False,
+    eval_holdout: bool = True,
     enable_cv: bool = False,
     cv_splits: int = 5,
     cv_repeat: int = 1,
@@ -299,6 +352,25 @@ def run_hgb_training(
     if len(X_raw_train) != len(y_train):
         raise ValueError("Inconsistent training rows between X_raw_train and y_train.")
 
+    y_holdout: pd.Series | None = None
+    X_raw_holdout: pd.DataFrame | None = None
+    if bool(eval_holdout):
+        if 2023 not in yearly_frames or 2024 not in yearly_frames:
+            raise ValueError("Holdout evaluation requested but years 2023/2024 are unavailable.")
+        _, y_holdout, ids_holdout = make_temporal_pairs(
+            yearly_frames[2023],
+            yearly_frames[2024],
+            2023,
+            2024,
+        )
+        X_raw_holdout = _build_raw_from_ids(
+            yearly_frames[2023],
+            ids_holdout,
+            expected_raw_cols,
+        )
+        if len(X_raw_holdout) != len(y_holdout):
+            raise ValueError("Inconsistent holdout rows between X_raw_holdout and y_holdout.")
+
     feature_pruning_plan = build_pruning_plan_from_training_frame(
         X_train_raw=X_raw_train,
         enable_feature_engineering=enable_feature_engineering,
@@ -315,34 +387,12 @@ def run_hgb_training(
 
     successes: dict[str, Any] = {}
     failures: dict[str, str] = {}
+    variant_scores_train: dict[str, np.ndarray] = {}
+    variant_scores_holdout: dict[str, np.ndarray | None] = {}
+    metadata_payload_by_variant: dict[str, dict[str, Any]] = {}
+    metadata_path_by_variant: dict[str, Path] = {}
     for variant in variants_list:
         try:
-            def _model_factory() -> Any:
-                estimator_cv, _, _ = _instantiate_hgb(
-                    deps["HistGradientBoostingClassifier"],
-                    variant,
-                )
-                return estimator_cv
-
-            cv_result: dict[str, Any] | None = None
-            if enable_cv:
-                cv_result = run_stratified_cv(
-                    model_name=f"hgb_{variant}",
-                    model_factory=_model_factory,
-                    build_pipeline_fn=build_model_pipeline,
-                    X_raw_train=X_raw_train,
-                    y_train=y_train,
-                    year_t=year_t,
-                    feature_pruning_plan=feature_pruning_plan,
-                    scaler_strategy="none",
-                    enable_feature_engineering=enable_feature_engineering,
-                    enable_age_bucket=enable_age_bucket,
-                    strict_raw=bool(strict),
-                    n_splits=int(cv_splits),
-                    repeat_n=int(cv_repeat),
-                    random_state=RANDOM_STATE,
-                )
-
             estimator, resolved_params, dropped_params = _instantiate_hgb(
                 deps["HistGradientBoostingClassifier"],
                 variant,
@@ -359,58 +409,46 @@ def run_hgb_training(
             pipeline.fit(X_raw_train, y_train)
 
             scores = pipeline.predict_proba(X_raw_train)[:, 1]
-            labels = (scores >= 0.5).astype(int)
-            y_true = y_train.astype(int).to_numpy()
+            holdout_scores = (
+                pipeline.predict_proba(X_raw_holdout)[:, 1]
+                if X_raw_holdout is not None
+                else None
+            )
+            variant_scores_train[variant] = scores
+            variant_scores_holdout[variant] = holdout_scores
             probability_summary = _compute_probability_summary(scores)
-            metrics_at_05 = {
-                "recall": _safe_metric(
-                    deps["recall_score"], y_true, labels, zero_division=0
-                ),
-                "precision": _safe_metric(
-                    deps["precision_score"], y_true, labels, zero_division=0
-                ),
-                "f1": _safe_metric(deps["f1_score"], y_true, labels, zero_division=0),
-                "roc_auc": _safe_metric(deps["roc_auc_score"], y_true, scores),
-                "pr_auc": _safe_metric(
-                    deps["average_precision_score"], y_true, scores
-                ),
-                "positive_rate_at_0.5": float(np.mean(labels)),
-            }
+            metrics_at_05 = compute_metrics_threshold(y_train, scores, threshold=0.5)
 
             variant_dir = base_output_dir / variant
             variant_dir.mkdir(parents=True, exist_ok=True)
             model_path = variant_dir / "model.joblib"
             metadata_path = variant_dir / "metadata.json"
             deps["joblib"].dump(pipeline, model_path)
+            metadata_path_by_variant[variant] = metadata_path
 
-            metadata_payload = _build_metadata_payload(
-                variant=variant,
-                resolved_params=resolved_params,
-                dropped_params=dropped_params,
-                year_t=year_t,
-                year_t1=year_t1,
-                enable_feature_engineering=enable_feature_engineering,
-                enable_age_bucket=enable_age_bucket,
-                feature_pruning_plan_hash=pruning_hash,
-                dataset_basename=dataset_basename,
-                dataset_sha256=dataset_sha256,
-                n_samples_train=int(len(y_train)),
-                y_prevalence=float(np.mean(y_true)),
-                probability_summary=probability_summary,
-                metrics_train_at_05=metrics_at_05,
-                sklearn_version=str(deps["sklearn_version"]),
-                cv_result=cv_result,
-            )
-            metadata_path.write_text(
-                json.dumps(metadata_payload, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            metadata_payload_by_variant[variant] = {
+                "variant": variant,
+                "resolved_params": resolved_params,
+                "dropped_params": dropped_params,
+                "year_t": year_t,
+                "year_t1": year_t1,
+                "enable_feature_engineering": enable_feature_engineering,
+                "enable_age_bucket": enable_age_bucket,
+                "feature_pruning_plan_hash": pruning_hash,
+                "dataset_basename": dataset_basename,
+                "dataset_sha256": dataset_sha256,
+                "n_samples_train": int(len(y_train)),
+                "y_prevalence": float(np.mean(y_train.astype(int).to_numpy())),
+                "probability_summary": probability_summary,
+                "metrics_train_at_05": metrics_at_05,
+                "sklearn_version": str(deps["sklearn_version"]),
+            }
 
             successes[variant] = {
                 "model_path": str(model_path),
                 "metadata_path": str(metadata_path),
                 "n_samples_train": int(len(y_train)),
-                "y_prevalence": float(np.mean(y_true)),
+                "y_prevalence": float(np.mean(y_train.astype(int).to_numpy())),
                 "metrics_train_at_0.5": metrics_at_05,
                 "cv_enabled": bool(enable_cv),
             }
@@ -420,7 +458,7 @@ def run_hgb_training(
                 year_t1,
                 variant,
                 len(y_train),
-                float(np.mean(y_true)),
+                float(np.mean(y_train.astype(int).to_numpy())),
             )
         except Exception as exc:  # pragma: no cover - defensive branch
             failures[variant] = str(exc)
@@ -430,6 +468,73 @@ def run_hgb_training(
 
     if not successes:
         raise RuntimeError(f"No nonlinear variant trained successfully. Failures: {failures}")
+
+    strategy_block = _build_class_imbalance_strategy(
+        y_train=y_train,
+        y_holdout=y_holdout,
+        variant_scores_train=variant_scores_train,
+        variant_scores_holdout=variant_scores_holdout,
+    )
+    prediction_policy = build_default_prediction_policy(
+        k_frac=0.10,
+        threshold=0.50,
+        score_name="risk_proba",
+    )
+    cv_payload_by_variant: dict[str, dict[str, Any] | None] = {}
+    if enable_cv:
+        for variant in variants_list:
+            model_factory = (
+                lambda v=variant: _instantiate_hgb(
+                    deps["HistGradientBoostingClassifier"],
+                    v,
+                )[0]
+            )
+            cv_payload_by_variant[variant] = run_stratified_cv(
+                model_name=f"hgb_{variant}",
+                model_factory=model_factory,
+                build_pipeline_fn=build_model_pipeline,
+                X_raw_train=X_raw_train,
+                y_train=y_train,
+                year_t=year_t,
+                feature_pruning_plan=feature_pruning_plan,
+                scaler_strategy="none",
+                enable_feature_engineering=enable_feature_engineering,
+                enable_age_bucket=enable_age_bucket,
+                strict_raw=bool(strict),
+                n_splits=int(cv_splits),
+                repeat_n=int(cv_repeat),
+                random_state=RANDOM_STATE,
+            )
+    else:
+        for variant in variants_list:
+            cv_payload_by_variant[variant] = None
+
+    for variant in successes:
+        base_payload = metadata_payload_by_variant[variant]
+        metadata_payload = _build_metadata_payload(
+            variant=base_payload["variant"],
+            resolved_params=base_payload["resolved_params"],
+            dropped_params=base_payload["dropped_params"],
+            year_t=base_payload["year_t"],
+            year_t1=base_payload["year_t1"],
+            enable_feature_engineering=base_payload["enable_feature_engineering"],
+            enable_age_bucket=base_payload["enable_age_bucket"],
+            feature_pruning_plan_hash=base_payload["feature_pruning_plan_hash"],
+            dataset_basename=base_payload["dataset_basename"],
+            dataset_sha256=base_payload["dataset_sha256"],
+            n_samples_train=base_payload["n_samples_train"],
+            y_prevalence=base_payload["y_prevalence"],
+            probability_summary=base_payload["probability_summary"],
+            metrics_train_at_05=base_payload["metrics_train_at_05"],
+            sklearn_version=base_payload["sklearn_version"],
+            class_imbalance_strategy=strategy_block,
+            prediction_policy=prediction_policy,
+            cv_result=cv_payload_by_variant.get(variant),
+        )
+        metadata_path_by_variant[variant].write_text(
+            json.dumps(metadata_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
     return {
         "file_path": str(resolved_dataset_path),
@@ -508,6 +613,13 @@ def _parse_args() -> argparse.Namespace:
         help="Number of repeats for stratified CV (1 = StratifiedKFold).",
     )
     parser.add_argument(
+        "--eval-holdout",
+        type=int,
+        default=1,
+        choices=[0, 1],
+        help="If 1, evaluate trained model on holdout pair 2023->2024 (no fitting on holdout).",
+    )
+    parser.add_argument(
         "--allow-nontrain-pair",
         type=int,
         default=0,
@@ -541,6 +653,7 @@ def main() -> None:
             enable_cv=_parse_bool_flag(args.cv),
             cv_splits=int(args.cv_splits),
             cv_repeat=int(args.cv_repeat),
+            eval_holdout=_parse_bool_flag(args.eval_holdout),
             strict=_parse_bool_flag(args.strict),
         )
     except ValueError as exc:

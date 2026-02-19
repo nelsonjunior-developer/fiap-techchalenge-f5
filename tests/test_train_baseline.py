@@ -144,6 +144,7 @@ def test_train_baseline_saves_artifacts_and_metadata_without_pii(
         variants="none",
         enable_feature_engineering=False,
         enable_age_bucket=False,
+        eval_holdout=False,
         strict=True,
     )
 
@@ -156,6 +157,8 @@ def test_train_baseline_saves_artifacts_and_metadata_without_pii(
     payload = json.loads(metadata_path.read_text(encoding="utf-8"))
     forbidden_keys = {"ids", "ra_list", "students", "rows", "RA_list"}
     assert forbidden_keys.isdisjoint(payload.keys())
+    assert "class_imbalance_strategy" in payload
+    assert "prediction_policy" in payload
 
     loaded_pipeline = _FakeJoblib.load(model_path)
     sample_raw = fake_frames[2022].loc[:, prep.get_expected_raw_feature_columns()].head(3)
@@ -188,6 +191,7 @@ def test_train_baseline_roundtrip_with_real_sklearn_if_available(
         variants="none",
         enable_feature_engineering=False,
         enable_age_bucket=False,
+        eval_holdout=False,
         strict=True,
     )
     model_path = Path(report["variants"]["none"]["model_path"])
