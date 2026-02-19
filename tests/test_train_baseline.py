@@ -196,3 +196,36 @@ def test_train_baseline_roundtrip_with_real_sklearn_if_available(
     probs = loaded.predict_proba(sample_raw)
     assert probs.shape == (3, 2)
 
+
+def test_train_baseline_enforces_train_pair_before_deps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _deps_should_not_run() -> dict[str, object]:
+        raise RuntimeError("deps should not be called")
+
+    monkeypatch.setattr(train_baseline, "_require_training_dependencies", _deps_should_not_run)
+    with pytest.raises(ValueError, match="2022->2023"):
+        train_baseline.run_baseline_training(
+            year_t=2022,
+            year_t1=2024,
+            allow_nontrain_pair=False,
+        )
+
+
+def test_train_baseline_main_exits_nonzero_for_disallowed_pair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(train_baseline, "setup_logging", lambda: None)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "python",
+            "--year-t",
+            "2022",
+            "--year-t1",
+            "2024",
+        ],
+    )
+    with pytest.raises(SystemExit) as exc:
+        train_baseline.main()
+    assert exc.value.code == 1

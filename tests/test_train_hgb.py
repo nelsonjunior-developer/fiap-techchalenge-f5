@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import pickle
 from pathlib import Path
@@ -202,3 +204,42 @@ def test_train_hgb_roundtrip_with_real_sklearn_if_available(
     sample_raw = fake_frames[2022].loc[:, prep.get_expected_raw_feature_columns()].head(3)
     probs = loaded.predict_proba(sample_raw)
     assert probs.shape == (3, 2)
+
+
+def test_train_hgb_holdout_requires_extra_flag_before_deps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _deps_should_not_run() -> dict[str, object]:
+        raise RuntimeError("deps should not be called")
+
+    monkeypatch.setattr(train_hgb, "_require_training_dependencies", _deps_should_not_run)
+    with pytest.raises(ValueError, match="holdout pair"):
+        train_hgb.run_hgb_training(
+            year_t=2023,
+            year_t1=2024,
+            allow_nontrain_pair=True,
+            allow_holdout_training=False,
+        )
+
+
+def test_train_hgb_main_exits_nonzero_for_disallowed_pair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(train_hgb, "setup_logging", lambda: None)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "python",
+            "--year-t",
+            "2023",
+            "--year-t1",
+            "2024",
+            "--allow-nontrain-pair",
+            "1",
+            "--allow-holdout-training",
+            "0",
+        ],
+    )
+    with pytest.raises(SystemExit) as exc:
+        train_hgb.main()
+    assert exc.value.code == 1

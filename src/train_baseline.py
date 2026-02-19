@@ -23,6 +23,7 @@ from src.preprocessing import (
     build_pruning_plan_from_training_frame,
 )
 from src.train_pipeline import build_model_pipeline
+from src.training_policy import OFFICIAL_TRAIN_PAIR, enforce_official_train_pair
 from src.utils import get_logger, setup_logging
 
 _logger = get_logger(__name__)
@@ -206,8 +207,23 @@ def run_baseline_training(
     variants: str = "none",
     enable_feature_engineering: bool = True,
     enable_age_bucket: bool = True,
+    allow_nontrain_pair: bool = False,
+    allow_holdout_training: bool = False,
     strict: bool = False,
 ) -> dict[str, Any]:
+    enforce_official_train_pair(
+        year_t=year_t,
+        year_t1=year_t1,
+        allow_nontrain_pair=allow_nontrain_pair,
+        allow_holdout_training=allow_holdout_training,
+    )
+    if (year_t, year_t1) != OFFICIAL_TRAIN_PAIR:
+        _logger.warning(
+            "Non-official training pair enabled: %s->%s",
+            year_t,
+            year_t1,
+        )
+
     deps = _require_training_dependencies()
     if scaler_strategy not in _ALLOWED_SCALERS:
         raise ValueError(
@@ -412,24 +428,44 @@ def _parse_args() -> argparse.Namespace:
         choices=[0, 1],
         help="If 1, fail immediately on any variant error.",
     )
+    parser.add_argument(
+        "--allow-nontrain-pair",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help="Allow training with pair different from 2022->2023 (not recommended).",
+    )
+    parser.add_argument(
+        "--allow-holdout-training",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help="Allow training on holdout pair 2023->2024 when nontrain override is enabled.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = _parse_args()
     setup_logging()
+    try:
+        report = run_baseline_training(
+            dataset_path=args.dataset_path,
+            year_t=int(args.year_t),
+            year_t1=int(args.year_t1),
+            out_dir=args.out_dir,
+            scaler_strategy=args.scaler,
+            variants=args.variants,
+            enable_feature_engineering=_parse_bool_flag(args.enable_feature_engineering),
+            enable_age_bucket=_parse_bool_flag(args.enable_age_bucket),
+            allow_nontrain_pair=_parse_bool_flag(args.allow_nontrain_pair),
+            allow_holdout_training=_parse_bool_flag(args.allow_holdout_training),
+            strict=_parse_bool_flag(args.strict),
+        )
+    except ValueError as exc:
+        _logger.error("%s", exc)
+        raise SystemExit(1) from exc
 
-    report = run_baseline_training(
-        dataset_path=args.dataset_path,
-        year_t=int(args.year_t),
-        year_t1=int(args.year_t1),
-        out_dir=args.out_dir,
-        scaler_strategy=args.scaler,
-        variants=args.variants,
-        enable_feature_engineering=_parse_bool_flag(args.enable_feature_engineering),
-        enable_age_bucket=_parse_bool_flag(args.enable_age_bucket),
-        strict=_parse_bool_flag(args.strict),
-    )
     _logger.info(
         "Baseline training completed | pair=%s->%s variants=%s out_dir=%s",
         report["year_t"],
@@ -441,4 +477,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

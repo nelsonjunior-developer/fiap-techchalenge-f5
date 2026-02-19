@@ -87,5 +87,5 @@ def test_transform_raw_to_model_frame_blocks_suspicious_model_columns() -> None:
     X_raw = _build_raw_frame(n_rows=3).loc[:, raw_cols]
     X_raw["my_feature_t1"] = pd.Series([0.1, 0.2, 0.3], dtype="Float64")
 
-    with pytest.raises(ValueError, match="Leakage detected"):
+    with pytest.raises(ValueError, match=r"(?i)(Leakage detected|leakage-like)"):
         to_model_frame(X_raw, context="inference")

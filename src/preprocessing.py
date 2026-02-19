@@ -297,7 +297,13 @@ def _build_preprocessor_internal(
         steps=[
             (
                 "imputer",
-                SimpleImputer(strategy="most_frequent", add_indicator=True),
+                # pandas StringDtype uses pd.NA; explicit missing_values avoids
+                # ambiguity errors in sklearn object-mask path on py39.
+                SimpleImputer(
+                    strategy="most_frequent",
+                    missing_values=pd.NA,
+                    add_indicator=True,
+                ),
             ),
             ("onehot", ohe),
         ]
