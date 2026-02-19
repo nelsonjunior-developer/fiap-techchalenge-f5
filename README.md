@@ -548,6 +548,9 @@ Referências:
 - CLI oficial para modelo não-linear:
   - `python -m src.train_hgb --file-path <xlsx> --year-t 2022 --year-t1 2023 --out-dir artifacts/models/nonlinear_hgb --variants default,tuned --enable-feature-engineering 1 --enable-age-bucket 0`
 - O treino utiliza `X_raw_train` (contrato raw da API) e `y_train` pareado via coorte `RA`.
+- Validação interna opcional (CV estratificada) no treino oficial:
+  - `--cv 1 --cv-splits 5 --cv-repeat 1`
+  - a seção `cv` é anexada no `metadata.json` de cada variante (métricas agregadas por fold e mean/std).
 - Artefatos por variante:
   - `artifacts/models/nonlinear_hgb/<variant>/model.joblib`
   - `artifacts/models/nonlinear_hgb/<variant>/metadata.json`
@@ -559,9 +562,9 @@ Este checklist foi elaborado considerando explicitamente as inconsistências rea
 Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 
 Progresso geral (barra visual):
-`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
+`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`63 de 110 tarefas concluídas (57.3%)`
+`64 de 110 tarefas concluídas (58.2%)`
 
 | Fase | Progresso |
 |---|---|
@@ -569,11 +572,11 @@ Progresso geral (barra visual):
 | Fase 2 - Organização do Projeto e Ambiente | 7/7 |
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 14/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 10/10 |
-| Fase 5 - Pipeline, Treinamento e Avaliação | 7/17 |
+| Fase 5 - Pipeline, Treinamento e Avaliação | 8/17 |
 | Fase 6 - Artefatos, API e Deploy | 0/15 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 2/13 |
 | Fase 8 - Documentação e Entrega Final | 10/21 |
-| Total | 63/110 |
+| Total | 64/110 |
 
 ### Fase 1 - Entendimento do Problema e Target [13/13]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
@@ -634,7 +637,7 @@ Nota de coorte temporal:
 - [x] Garantir que nenhuma feature use informação futura
 - [x] Documentar as principais decisões de feature engineering
 
-### Fase 5 - Pipeline, Treinamento e Avaliação [7/17]
+### Fase 5 - Pipeline, Treinamento e Avaliação [8/17]
 Nota de shift temporal:
 > Antes do treinamento final, é realizada uma análise de shift temporal do target e das features, uma vez que a prevalência da classe positiva varia significativamente entre os períodos analisados (aprox. `61%` para `40%`).
 
@@ -645,7 +648,7 @@ Nota de shift temporal:
 - [x] Treinar modelo baseline (`Logistic Regression`)
 - [x] Treinar modelo não-linear (ex.: `HistGradientBoosting`)
 - [x] Usar apenas dados de treino (`2022 -> 2023`)
-- [ ] (Opcional) Validação interna (CV estratificada)
+- [x] (Opcional) Validação interna (CV estratificada)
 - [ ] Definir estratégia explícita para desbalanceamento de classes (`class_weight`, ajuste de threshold ou decisão justificada de não tratar)
 - [ ] Comparar modelos com foco em Recall e PR-AUC
 - [ ] Avaliar desempenho no holdout temporal (`2023 -> 2024`)

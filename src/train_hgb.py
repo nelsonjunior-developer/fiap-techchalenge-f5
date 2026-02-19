@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 from src.config import RANDOM_STATE
+from src.cv import run_stratified_cv
 from src.data import (
     get_default_dataset_path,
     load_pede_workbook_with_metadata,
@@ -201,6 +202,7 @@ def _build_metadata_payload(
     probability_summary: dict[str, float],
     metrics_train_at_05: dict[str, float | None],
     sklearn_version: str,
+    cv_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     notes = ["train-only metrics; holdout eval is a later task"]
     if dropped_params:
@@ -232,6 +234,8 @@ def _build_metadata_payload(
     forbidden_present = _FORBIDDEN_METADATA_KEYS & set(payload.keys())
     if forbidden_present:
         raise ValueError(f"Forbidden metadata keys found: {sorted(forbidden_present)}")
+    if cv_result is not None:
+        payload["cv"] = cv_result
     return payload
 
 
@@ -246,6 +250,9 @@ def run_hgb_training(
     enable_age_bucket: bool = False,
     allow_nontrain_pair: bool = False,
     allow_holdout_training: bool = False,
+    enable_cv: bool = False,
+    cv_splits: int = 5,
+    cv_repeat: int = 1,
     strict: bool = False,
 ) -> dict[str, Any]:
     enforce_official_train_pair(
@@ -259,6 +266,10 @@ def run_hgb_training(
             "Non-official training pair enabled: %s->%s",
             year_t,
             year_t1,
+        )
+    if enable_cv and (year_t, year_t1) != OFFICIAL_TRAIN_PAIR:
+        raise ValueError(
+            "Internal CV is restricted to official training pair 2022->2023."
         )
 
     deps = _require_training_dependencies()
@@ -306,6 +317,32 @@ def run_hgb_training(
     failures: dict[str, str] = {}
     for variant in variants_list:
         try:
+            def _model_factory() -> Any:
+                estimator_cv, _, _ = _instantiate_hgb(
+                    deps["HistGradientBoostingClassifier"],
+                    variant,
+                )
+                return estimator_cv
+
+            cv_result: dict[str, Any] | None = None
+            if enable_cv:
+                cv_result = run_stratified_cv(
+                    model_name=f"hgb_{variant}",
+                    model_factory=_model_factory,
+                    build_pipeline_fn=build_model_pipeline,
+                    X_raw_train=X_raw_train,
+                    y_train=y_train,
+                    year_t=year_t,
+                    feature_pruning_plan=feature_pruning_plan,
+                    scaler_strategy="none",
+                    enable_feature_engineering=enable_feature_engineering,
+                    enable_age_bucket=enable_age_bucket,
+                    strict_raw=bool(strict),
+                    n_splits=int(cv_splits),
+                    repeat_n=int(cv_repeat),
+                    random_state=RANDOM_STATE,
+                )
+
             estimator, resolved_params, dropped_params = _instantiate_hgb(
                 deps["HistGradientBoostingClassifier"],
                 variant,
@@ -362,6 +399,7 @@ def run_hgb_training(
                 probability_summary=probability_summary,
                 metrics_train_at_05=metrics_at_05,
                 sklearn_version=str(deps["sklearn_version"]),
+                cv_result=cv_result,
             )
             metadata_path.write_text(
                 json.dumps(metadata_payload, ensure_ascii=False, indent=2),
@@ -374,6 +412,7 @@ def run_hgb_training(
                 "n_samples_train": int(len(y_train)),
                 "y_prevalence": float(np.mean(y_true)),
                 "metrics_train_at_0.5": metrics_at_05,
+                "cv_enabled": bool(enable_cv),
             }
             _logger.info(
                 "Nonlinear variant trained | pair=%s->%s variant=%s n=%d prevalence=%.4f",
@@ -450,6 +489,25 @@ def _parse_args() -> argparse.Namespace:
         help="If 1, fail immediately on any variant error.",
     )
     parser.add_argument(
+        "--cv",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help="Enable optional internal stratified CV on 2022->2023 train pair.",
+    )
+    parser.add_argument(
+        "--cv-splits",
+        type=int,
+        default=5,
+        help="Number of folds for stratified CV (when --cv=1).",
+    )
+    parser.add_argument(
+        "--cv-repeat",
+        type=int,
+        default=1,
+        help="Number of repeats for stratified CV (1 = StratifiedKFold).",
+    )
+    parser.add_argument(
         "--allow-nontrain-pair",
         type=int,
         default=0,
@@ -480,6 +538,9 @@ def main() -> None:
             enable_age_bucket=_parse_bool_flag(args.enable_age_bucket),
             allow_nontrain_pair=_parse_bool_flag(args.allow_nontrain_pair),
             allow_holdout_training=_parse_bool_flag(args.allow_holdout_training),
+            enable_cv=_parse_bool_flag(args.cv),
+            cv_splits=int(args.cv_splits),
+            cv_repeat=int(args.cv_repeat),
             strict=_parse_bool_flag(args.strict),
         )
     except ValueError as exc:

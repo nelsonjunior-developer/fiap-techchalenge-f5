@@ -229,3 +229,19 @@ def test_train_baseline_main_exits_nonzero_for_disallowed_pair(
     with pytest.raises(SystemExit) as exc:
         train_baseline.main()
     assert exc.value.code == 1
+
+
+def test_train_baseline_cv_only_official_pair_before_deps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _deps_should_not_run() -> dict[str, object]:
+        raise RuntimeError("deps should not be called")
+
+    monkeypatch.setattr(train_baseline, "_require_training_dependencies", _deps_should_not_run)
+    with pytest.raises(ValueError, match="restricted to official training pair"):
+        train_baseline.run_baseline_training(
+            year_t=2022,
+            year_t1=2024,
+            allow_nontrain_pair=True,
+            enable_cv=True,
+        )
