@@ -627,6 +627,26 @@ Referências:
   - `evaluation_holdout` (pair `2023->2024`, quando `--eval-holdout 1`)
   - bloco de métricas com `Recall`, `Precision`, `F1`, `ROC-AUC`, `PR-AUC`, `positive_rate` e `confusion_matrix_at_0.5` (`tn/fp/fn/tp`).
 
+## Shift Temporal (Fase 5)
+
+- A validacao oficial de shift roda no **MODEL frame** (pos feature engineering + feature pruning), que representa exatamente o que o modelo consome.
+- O relatorio inclui:
+  - shift do target (prevalencia train vs holdout e deltas absoluto/relativo);
+  - shift por feature com scores de drift (`PSI` para numericas e `TVD` para categoricas/binary), mudanca de missing e severidade por feature.
+- Thresholds padrao:
+  - target `|delta_abs|`: `WARNING>=0.15`, `FAIL>=0.25`
+  - numericas (`PSI`): `WARNING>=0.10`, `FAIL>=0.25`
+  - categoricas/binary (`TVD`): `WARNING>=0.10`, `FAIL>=0.25`
+  - missing delta: `WARNING>=0.10`, `FAIL>=0.20`
+- Regra de governanca:
+  - `WARNING` nao bloqueia automaticamente;
+  - `FAIL` e atribuido por regra objetiva de agregacao (target FAIL ou contagem de features FAIL acima do gate).
+- Comando oficial (config do campeao atual):
+  - `python -m src.temporal_shift --config winner`
+- Artefatos:
+  - `artifacts/temporal_shift_report.json` (obrigatorio)
+  - `artifacts/temporal_shift_report.md` (opcional)
+
 ## Checklist do Projeto - Datathon Machine Learning Engineering
 
 Este checklist foi elaborado considerando explicitamente as inconsistências reais do dataset fornecido (schemas distintos entre anos, colunas duplicadas, valores inválidos, mudanças semânticas de campos e interseção parcial de estudantes entre períodos). As etapas descritas adotam práticas de Data Engineering e MLOps para garantir robustez, reprodutibilidade e validade estatística do modelo em produção.
@@ -634,9 +654,9 @@ Este checklist foi elaborado considerando explicitamente as inconsistências rea
 Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 
 Progresso geral (barra visual):
-`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
+`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`72 de 110 tarefas concluídas (65.5%)`
+`73 de 110 tarefas concluídas (66.4%)`
 
 | Fase | Progresso |
 |---|---|
@@ -644,11 +664,11 @@ Progresso geral (barra visual):
 | Fase 2 - Organização do Projeto e Ambiente | 7/7 |
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 14/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 10/10 |
-| Fase 5 - Pipeline, Treinamento e Avaliação | 16/17 |
+| Fase 5 - Pipeline, Treinamento e Avaliação | 17/17 |
 | Fase 6 - Artefatos, API e Deploy | 0/15 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 2/13 |
 | Fase 8 - Documentação e Entrega Final | 10/21 |
-| Total | 72/110 |
+| Total | 73/110 |
 
 ### Fase 1 - Entendimento do Problema e Target [13/13]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
@@ -709,7 +729,7 @@ Nota de coorte temporal:
 - [x] Garantir que nenhuma feature use informação futura
 - [x] Documentar as principais decisões de feature engineering
 
-### Fase 5 - Pipeline, Treinamento e Avaliação [16/17]
+### Fase 5 - Pipeline, Treinamento e Avaliação [17/17]
 Nota de shift temporal:
 > Antes do treinamento final, é realizada uma análise de shift temporal do target e das features, uma vez que a prevalência da classe positiva varia significativamente entre os períodos analisados (aprox. `61%` para `40%`).
 
@@ -729,7 +749,7 @@ Nota de shift temporal:
 - [x] Definir threshold operacional focado em Recall
 - [x] Definir critério objetivo formal de seleção do modelo final (ex.: maior Recall com PR-AUC acima de limiar mínimo)
 - [x] Justificar escolha do modelo final
-- [ ] Incluir validação de shift temporal do target e das features antes do treinamento final
+- [x] Incluir validação de shift temporal do target e das features antes do treinamento final
 
 ### Fase 6 - Artefatos, API e Deploy [0/15]
 - [ ] Salvar pipeline completa em `model.joblib`
