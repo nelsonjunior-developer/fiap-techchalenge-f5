@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 from src.config import RANDOM_STATE
+from src.dataset_versioning import safe_path_hint
 from src.features import get_engineered_feature_names
 from src.metadata_schema import validate_metadata
 from src.utils import get_logger, setup_logging
@@ -446,18 +447,59 @@ def _resolve_feature_pruning_block(
 
 def _resolve_dataset_block(metadata: dict[str, Any]) -> dict[str, Any]:
     raw = metadata.get("dataset")
+    path_hint: str | None = None
+    basename: str | None = None
+    size_bytes: int | None = None
+    mtime_utc: str | None = None
+    sha256: str | None = None
+
     if isinstance(raw, dict):
-        return {
-            "path_hint": raw.get("path_hint"),
-            "basename": raw.get("basename"),
-            "sha256": raw.get("sha256"),
-        }
-    return {
-        "path_hint": metadata.get("dataset_path_hint")
+        raw_path_hint = raw.get("path_hint")
+        if isinstance(raw_path_hint, str) and raw_path_hint.strip():
+            path_hint = safe_path_hint(raw_path_hint)
+
+        raw_basename = raw.get("basename")
+        if isinstance(raw_basename, str) and raw_basename.strip():
+            basename = raw_basename
+
+        raw_size = raw.get("bytes")
+        if isinstance(raw_size, int):
+            size_bytes = int(raw_size)
+
+        raw_mtime = raw.get("mtime_utc")
+        if isinstance(raw_mtime, str):
+            mtime_utc = raw_mtime
+
+        raw_sha = raw.get("sha256")
+        if isinstance(raw_sha, str) and raw_sha.strip():
+            sha256 = raw_sha
+
+    fallback_path = (
+        metadata.get("dataset_path_hint")
         or metadata.get("dataset_path")
-        or metadata.get("file_path"),
-        "basename": metadata.get("dataset_basename"),
-        "sha256": metadata.get("dataset_sha256"),
+        or metadata.get("file_path")
+    )
+    if path_hint is None and isinstance(fallback_path, str) and fallback_path.strip():
+        path_hint = safe_path_hint(fallback_path)
+
+    if basename is None:
+        raw_dataset_basename = metadata.get("dataset_basename")
+        if isinstance(raw_dataset_basename, str) and raw_dataset_basename.strip():
+            basename = raw_dataset_basename
+        elif path_hint:
+            basename = str(path_hint)
+
+    if sha256 is None:
+        raw_dataset_sha = metadata.get("dataset_sha256")
+        if isinstance(raw_dataset_sha, str) and raw_dataset_sha.strip():
+            sha256 = raw_dataset_sha
+
+    return {
+        "path_hint": path_hint,
+        "basename": basename,
+        "bytes": size_bytes,
+        "mtime_utc": mtime_utc,
+        "sha256": sha256,
     }
 
 
@@ -530,6 +572,7 @@ def _enrich_metadata_for_serving(
     promoted_at: str,
 ) -> dict[str, Any]:
     eval_blocks = _resolve_eval_blocks(metadata)
+    dataset_block = _resolve_dataset_block(metadata)
     expected_raw_cols = metadata.get("expected_raw_cols")
     if not isinstance(expected_raw_cols, list):
         expected_raw_cols = metadata.get("expected_cols")
@@ -564,6 +607,12 @@ def _enrich_metadata_for_serving(
         metadata.get("model_version")
         or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
     )
+    notes_raw = metadata.get("notes")
+    notes = list(notes_raw) if isinstance(notes_raw, list) else []
+    if dataset_block.get("sha256") is None:
+        notes.append(
+            "dataset.sha256 unavailable in legacy metadata; value set to null during promotion."
+        )
 
     enriched = dict(metadata)
     enriched.update(
@@ -576,7 +625,7 @@ def _enrich_metadata_for_serving(
             "random_state": int(metadata.get("random_state", RANDOM_STATE)),
             "train_pair": train_pair,
             "holdout_pair": holdout_pair,
-            "dataset": _resolve_dataset_block(metadata),
+            "dataset": dataset_block,
             "expected_raw_cols": [str(col) for col in expected_raw_cols],
             "expected_model_cols": [str(col) for col in expected_model_cols],
             "excluded_cols": [str(col) for col in excluded_cols],
@@ -598,6 +647,7 @@ def _enrich_metadata_for_serving(
                 "model_joblib_sha256": model_sha256,
                 "metadata_sha256": None,
             },
+            "notes": list(dict.fromkeys(str(note) for note in notes)),
         }
     )
     return enriched

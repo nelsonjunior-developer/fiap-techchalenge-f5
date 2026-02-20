@@ -157,6 +157,12 @@ def test_train_baseline_saves_artifacts_and_metadata_without_pii(
     payload = json.loads(metadata_path.read_text(encoding="utf-8"))
     forbidden_keys = {"ids", "ra_list", "students", "rows", "RA_list"}
     assert forbidden_keys.isdisjoint(payload.keys())
+    assert payload["dataset"]["basename"] == fake_dataset.name
+    assert payload["dataset"]["path_hint"] == fake_dataset.name
+    assert payload["dataset"]["bytes"] == fake_dataset.stat().st_size
+    assert isinstance(payload["dataset"]["mtime_utc"], str)
+    assert isinstance(payload["dataset"]["sha256"], str)
+    assert len(payload["dataset"]["sha256"]) == 64
     assert "class_imbalance_strategy" in payload
     assert "prediction_policy" in payload
     assert isinstance(payload.get("evaluation_train"), dict)

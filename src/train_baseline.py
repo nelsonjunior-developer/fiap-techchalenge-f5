@@ -20,6 +20,10 @@ from src.data import (
     load_pede_workbook_with_metadata,
     make_temporal_pairs,
 )
+from src.dataset_versioning import (
+    get_dataset_fingerprint,
+    persist_dataset_version_event,
+)
 from src.preprocessing import (
     build_preprocessing_bundle,
     build_pruning_plan_from_training_frame,
@@ -219,7 +223,7 @@ def _build_metadata_payload(
     class_weight: str | None,
     year_t: int,
     year_t1: int,
-    dataset_path_hint: str | None,
+    dataset_fingerprint: dict[str, Any],
     scaler_strategy: str,
     enable_feature_engineering: bool,
     enable_age_bucket: bool,
@@ -317,9 +321,11 @@ def _build_metadata_payload(
         },
         "holdout_pair": holdout_pair,
         "dataset": {
-            "path_hint": dataset_path_hint,
-            "basename": dataset_basename,
-            "sha256": dataset_sha256,
+            "path_hint": dataset_fingerprint.get("path_hint"),
+            "basename": dataset_fingerprint.get("basename", dataset_basename),
+            "bytes": dataset_fingerprint.get("bytes"),
+            "mtime_utc": dataset_fingerprint.get("mtime_utc"),
+            "sha256": dataset_fingerprint.get("sha256", dataset_sha256),
         },
         "expected_raw_cols": list(expected_raw_cols),
         "expected_model_cols": list(expected_model_cols),
@@ -585,7 +591,12 @@ def run_baseline_training(
 
     pruning_hash = _hash_pruning_plan(feature_pruning_plan)
     dataset_basename = resolved_dataset_path.name
-    dataset_sha256 = _compute_sha256(resolved_dataset_path)
+    dataset_fingerprint = get_dataset_fingerprint(resolved_dataset_path)
+    dataset_sha256 = str(dataset_fingerprint["sha256"])
+    persist_dataset_version_event(
+        context="train_baseline",
+        dataset_fingerprint=dataset_fingerprint,
+    )
     base_output_dir = Path(out_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -738,7 +749,7 @@ def run_baseline_training(
                 "class_weight": class_weight,
                 "year_t": year_t,
                 "year_t1": year_t1,
-                "dataset_path_hint": str(resolved_dataset_path),
+                "dataset_fingerprint": dataset_fingerprint,
                 "scaler_strategy": scaler_strategy,
                 "enable_feature_engineering": enable_feature_engineering,
                 "enable_age_bucket": enable_age_bucket,
@@ -851,7 +862,7 @@ def run_baseline_training(
             class_weight=base_payload["class_weight"],
             year_t=base_payload["year_t"],
             year_t1=base_payload["year_t1"],
-            dataset_path_hint=base_payload["dataset_path_hint"],
+            dataset_fingerprint=base_payload["dataset_fingerprint"],
             scaler_strategy=base_payload["scaler_strategy"],
             enable_feature_engineering=base_payload["enable_feature_engineering"],
             enable_age_bucket=base_payload["enable_age_bucket"],

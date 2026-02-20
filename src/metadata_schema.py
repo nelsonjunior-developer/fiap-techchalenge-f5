@@ -102,6 +102,10 @@ def _validate_dataset_block(payload: dict[str, Any], errors: list[str]) -> None:
             continue
         if not _is_str_or_none(dataset[key]):
             errors.append(f"invalid type for key 'dataset.{key}' (expected str|null)")
+    if "bytes" in dataset and dataset["bytes"] is not None and not isinstance(dataset["bytes"], int):
+        errors.append("invalid type for key 'dataset.bytes' (expected int|null)")
+    if "mtime_utc" in dataset and not _is_str_or_none(dataset["mtime_utc"]):
+        errors.append("invalid type for key 'dataset.mtime_utc' (expected str|null)")
 
 
 def _validate_feature_engineering(payload: dict[str, Any], errors: list[str]) -> None:

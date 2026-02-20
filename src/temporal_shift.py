@@ -13,6 +13,10 @@ import numpy as np
 import pandas as pd
 
 from src.data import get_default_dataset_path, load_pede_workbook_with_metadata, make_temporal_pairs
+from src.dataset_versioning import (
+    get_dataset_fingerprint,
+    persist_dataset_version_event,
+)
 from src.preprocessing import (
     build_pruning_plan_from_training_frame,
     get_expected_raw_feature_columns,
@@ -604,6 +608,7 @@ def _resolve_feature_pruning_plan(
 def _build_shift_report(
     *,
     config_info: dict[str, Any],
+    dataset_fingerprint: dict[str, Any],
     thresholds: dict[str, float | int],
     target_shift: dict[str, Any],
     feature_shift: dict[str, Any],
@@ -628,6 +633,7 @@ def _build_shift_report(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "status": status,
         "config_mode": config_info.get("mode"),
+        "dataset": dict(dataset_fingerprint),
         "configuration": {
             "model_family": config_info.get("model_family"),
             "variant": config_info.get("variant"),
@@ -815,6 +821,11 @@ def run_temporal_shift(
     config: str = "winner",
 ) -> dict[str, Any]:
     resolved_dataset_path = _resolve_dataset_path(file_path)
+    dataset_fingerprint = get_dataset_fingerprint(resolved_dataset_path)
+    persist_dataset_version_event(
+        context="temporal_shift",
+        dataset_fingerprint=dataset_fingerprint,
+    )
     dfs, _, _ = load_pede_workbook_with_metadata(file_path=resolved_dataset_path)
     models_root_path = Path(models_root)
     selection_path_obj = Path(selection_path)
@@ -851,6 +862,7 @@ def run_temporal_shift(
         errors.append(str(exc))
         report = _build_shift_report(
             config_info=config_info,
+            dataset_fingerprint=dataset_fingerprint,
             thresholds=thresholds,
             target_shift={
                 "train": {"n": 0, "n_pos": 0, "prevalence": 0.0},
@@ -906,6 +918,7 @@ def run_temporal_shift(
         )
         report = _build_shift_report(
             config_info=config_info,
+            dataset_fingerprint=dataset_fingerprint,
             thresholds=thresholds,
             target_shift=target_shift,
             feature_shift=feature_shift,

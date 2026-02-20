@@ -682,6 +682,117 @@ Referências:
 - Comando oficial:
   - `python -m src.build_reference_data --model-dir app/model --out-dir app/model/reference --max-rows 1000 --backup 1 --force 0`
 
+## Versionamento do Dataset (Fase 6)
+
+- Todo treino/avaliacao passa a registrar fingerprint do dataset (`SHA-256` em streaming), sem salvar conteudo de linhas.
+- O `metadata.json` por variante inclui `dataset.path_hint`, `basename`, `bytes`, `mtime_utc` e `sha256`.
+- Cada execucao gera um evento em `artifacts/dataset_versions/` com contexto (`train_baseline`, `train_hgb`, `evaluate_holdout`, `temporal_shift`, `build_reference_data`).
+- Comando utilitario:
+  - `python -m src.dataset_versioning --path dataset/PEDE_PASSOS_DATASET_FIAP.xlsx --context manual_check --out artifacts/dataset_versions/manual_check.json`
+
+## Schema Formal de Saída (Fase 6)
+
+- Contrato formal implementado em `app/schemas.py` com modelos Pydantic:
+  - `PredictionResult` (`risk_proba`, `risk_class`, `threshold_applied`, `model_version`, `model_family`, `variant`, `decision_policy`, `notes`)
+  - `PredictResponse` (`predictions`, `count`, `generated_at`)
+- Fonte de verdade:
+  - `threshold_applied` vem de `app/model/metadata.json` em `threshold_policy.operational_fixed_threshold` (fallback legado: `threshold_policy.operational.threshold`; default final `0.30`)
+  - `model_version`, `model_family` e `variant` também vêm do metadata (fallback `unknown`)
+- Regra de validação:
+  - `risk_proba` deve estar em `[0,1]`
+  - `risk_class` é sempre derivada de `risk_proba >= threshold_applied`
+
+Exemplo de resposta (single):
+
+```json
+{
+  "predictions": [
+    {
+      "risk_proba": 0.78,
+      "risk_class": 1,
+      "threshold_applied": 0.3,
+      "model_version": "2026-02-20T12-00-00Z",
+      "model_family": "nonlinear_hgb",
+      "variant": "default",
+      "decision_policy": "fixed_threshold",
+      "notes": ["threshold_from_metadata"]
+    }
+  ],
+  "count": 1,
+  "generated_at": "2026-02-20T13:20:00+00:00"
+}
+```
+
+## Rodar API Local (Fase 6)
+
+- Subir aplicação:
+  - `uvicorn app.main:app --reload --port 8000`
+- Health check:
+  - `curl -s http://127.0.0.1:8000/health`
+- Version check:
+  - `curl -s http://127.0.0.1:8000/version`
+
+Exemplo `GET /health`:
+
+```json
+{
+  "status": "ok"
+}
+```
+
+Exemplo `GET /version` (sem metadata carregado):
+
+```json
+{
+  "model_version": "unknown",
+  "model_family": "unknown",
+  "variant": "unknown",
+  "threshold_operational": 0.3,
+  "metadata_loaded": false,
+  "notes": [
+    "metadata_missing_or_invalid",
+    "fallback_unknown_model_version",
+    "fallback_unknown_model_family",
+    "fallback_unknown_variant",
+    "fallback_default_threshold",
+    "model_joblib_not_found",
+    "metadata_json_not_found",
+    "model_loading_stub_only"
+  ]
+}
+```
+
+Exemplo de resposta (batch):
+
+```json
+{
+  "predictions": [
+    {
+      "risk_proba": 0.21,
+      "risk_class": 0,
+      "threshold_applied": 0.3,
+      "model_version": "2026-02-20T12-00-00Z",
+      "model_family": "nonlinear_hgb",
+      "variant": "default",
+      "decision_policy": "fixed_threshold",
+      "notes": null
+    },
+    {
+      "risk_proba": 0.65,
+      "risk_class": 1,
+      "threshold_applied": 0.3,
+      "model_version": "2026-02-20T12-00-00Z",
+      "model_family": "nonlinear_hgb",
+      "variant": "default",
+      "decision_policy": "fixed_threshold",
+      "notes": null
+    }
+  ],
+  "count": 2,
+  "generated_at": "2026-02-20T13:20:00+00:00"
+}
+```
+
 ## Checklist do Projeto - Datathon Machine Learning Engineering
 
 Este checklist foi elaborado considerando explicitamente as inconsistências reais do dataset fornecido (schemas distintos entre anos, colunas duplicadas, valores inválidos, mudanças semânticas de campos e interseção parcial de estudantes entre períodos). As etapas descritas adotam práticas de Data Engineering e MLOps para garantir robustez, reprodutibilidade e validade estatística do modelo em produção.
@@ -689,9 +800,9 @@ Este checklist foi elaborado considerando explicitamente as inconsistências rea
 Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 
 Progresso geral (barra visual):
-`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
+`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`76 de 110 tarefas concluídas (69.1%)`
+`80 de 110 tarefas concluídas (72.7%)`
 
 | Fase | Progresso |
 |---|---|
@@ -700,10 +811,13 @@ Progresso geral (barra visual):
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 14/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 10/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 17/17 |
-| Fase 6 - Artefatos, API e Deploy | 3/15 |
+| Fase 6 - Artefatos, API e Deploy | 7/15 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 2/13 |
 | Fase 8 - Documentação e Entrega Final | 10/21 |
-| Total | 76/110 |
+| Total | 80/110 |
+
+Nota:
+- A `Fase 9` é opcional e fica fora da contagem oficial de progresso (`barra`, `X/Y` e `%`).
 
 ### Fase 1 - Entendimento do Problema e Target [13/13]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
@@ -786,15 +900,15 @@ Nota de shift temporal:
 - [x] Justificar escolha do modelo final
 - [x] Incluir validação de shift temporal do target e das features antes do treinamento final
 
-### Fase 6 - Artefatos, API e Deploy [3/15]
+### Fase 6 - Artefatos, API e Deploy [7/15]
 - [x] Salvar pipeline completa em `model.joblib`
 - [x] Criar `metadata.json` com modelo, métricas, threshold, features esperadas, data do treino e versões das bibliotecas
 - [x] Salvar dados de referência para monitoramento de drift
-- [ ] Versionar dataset de treino/validação (`hash/checksum` + versão usada no experimento)
-- [ ] Definir schema formal de saída do modelo/API (probabilidade, classe prevista, threshold aplicado e versão do modelo)
-- [ ] Criar aplicação FastAPI
+- [x] Versionar dataset de treino/validação (`hash/checksum` + versão usada no experimento)
+- [x] Definir schema formal de saída do modelo/API (probabilidade, classe prevista, threshold aplicado e versão do modelo)
+- [x] Criar aplicação FastAPI
 - [ ] Implementar endpoint `POST /predict`
-- [ ] Implementar `GET /health` e `GET /version`
+- [x] Implementar `GET /health` e `GET /version`
 - [ ] Validar entradas com Pydantic
 - [ ] Garantir carregamento do modelo salvo
 - [ ] Criar Dockerfile enxuto baseado em `python:slim`
@@ -840,6 +954,13 @@ Nota de shift temporal:
 - [x] Refinar redação do objetivo para "apresentar defasagem no t+1" (evita ambiguidade de transição vs estado)
 - [x] Refinar visão geral com vínculo explícito a `Defas/Defasagem` e regra de coorte por `RA`
 - [x] Adicionar menção explícita de não-causalidade do modelo na seção de contexto de uso
+
+### Fase 9 - Opcional (Backlog Futuro, fora da contagem oficial)
+- [ ] Implementar explainability local do campeão (ex.: importâncias globais e análise de erro agregada)
+- [ ] Definir rotina de retreino automatizada com gatilho por tempo + gatilho por drift
+- [ ] Publicar dashboard operacional consolidando inferência, drift e métricas pós-fato
+- [ ] Adicionar testes de carga básicos para API de inferência
+- [ ] Preparar pacote de evidências para banca (runbook + artefatos + checklist de auditoria)
 
 <details>
 <summary>Notas de uso do checklist</summary>

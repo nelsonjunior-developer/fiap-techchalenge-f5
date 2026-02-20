@@ -16,6 +16,10 @@ from src.data import (
     load_pede_workbook_with_metadata,
     make_temporal_pairs,
 )
+from src.dataset_versioning import (
+    get_dataset_fingerprint,
+    persist_dataset_version_event,
+)
 from src.metrics import compute_metrics_threshold, compute_prevalence
 from src.preprocessing import get_expected_raw_feature_columns
 from src.training_policy import OFFICIAL_HOLDOUT_PAIR
@@ -121,8 +125,14 @@ def run_holdout_evaluation(
         errors.append(f"No model.joblib files found under: {models_root_path}")
 
     resolved_dataset_path = _resolve_dataset_path(dataset_path) if discovered else None
+    dataset_fingerprint: dict[str, Any] | None = None
     yearly_frames: dict[int, pd.DataFrame] = {}
     if resolved_dataset_path is not None:
+        dataset_fingerprint = get_dataset_fingerprint(resolved_dataset_path)
+        persist_dataset_version_event(
+            context="evaluate_holdout",
+            dataset_fingerprint=dataset_fingerprint,
+        )
         yearly_frames, _, _ = load_pede_workbook_with_metadata(file_path=resolved_dataset_path)
         if OFFICIAL_HOLDOUT_PAIR[0] not in yearly_frames or OFFICIAL_HOLDOUT_PAIR[1] not in yearly_frames:
             errors.append(
@@ -186,6 +196,7 @@ def run_holdout_evaluation(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "models_root": str(models_root_path),
         "dataset_path": None if resolved_dataset_path is None else str(resolved_dataset_path),
+        "dataset": dataset_fingerprint,
         "pair": f"{OFFICIAL_HOLDOUT_PAIR[0]}->{OFFICIAL_HOLDOUT_PAIR[1]}",
         "rows": rows,
         "status": status,

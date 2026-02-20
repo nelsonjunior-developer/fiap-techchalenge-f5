@@ -14,6 +14,10 @@ import pandas as pd
 
 from src.config import RANDOM_STATE
 from src.data import get_default_dataset_path, load_pede_workbook_with_metadata, make_temporal_pairs
+from src.dataset_versioning import (
+    get_dataset_fingerprint,
+    persist_dataset_version_event,
+)
 from src.metadata_schema import validate_metadata
 from src.preprocessing import transform_raw_to_model_frame
 from src.training_utils import build_raw_from_ids
@@ -314,6 +318,11 @@ def run_build_reference_data(
     year_t1 = _to_int(train_pair.get("year_t1"), 2023)
 
     resolved_dataset_path = _resolve_dataset_path(file_path)
+    dataset_fingerprint = get_dataset_fingerprint(resolved_dataset_path)
+    persist_dataset_version_event(
+        context="build_reference_data",
+        dataset_fingerprint=dataset_fingerprint,
+    )
     dfs, _, _ = load_pede_workbook_with_metadata(file_path=resolved_dataset_path)
     if year_t not in dfs or year_t1 not in dfs:
         raise ValueError(
@@ -413,6 +422,13 @@ def run_build_reference_data(
             "n": int(n_train),
             "n_pos": int(n_pos),
             "prevalence": float(prevalence),
+        },
+        "dataset": {
+            "path_hint": dataset_fingerprint.get("path_hint"),
+            "basename": dataset_fingerprint.get("basename"),
+            "bytes": dataset_fingerprint.get("bytes"),
+            "mtime_utc": dataset_fingerprint.get("mtime_utc"),
+            "sha256": dataset_fingerprint.get("sha256"),
         },
         "sampling": {
             "max_rows": int(max_rows),

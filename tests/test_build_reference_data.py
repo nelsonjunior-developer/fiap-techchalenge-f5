@@ -157,6 +157,10 @@ def test_build_reference_data_happy_path(
     meta_payload = json.loads(meta_path.read_text(encoding="utf-8"))
     assert meta_payload["sampling"]["used_rows"] == 1000
     assert meta_payload["sampling"]["strategy"] == "stratified_deterministic"
+    assert meta_payload["dataset"]["basename"] == fake_dataset.name
+    assert meta_payload["dataset"]["path_hint"] == fake_dataset.name
+    assert isinstance(meta_payload["dataset"]["sha256"], str)
+    assert len(meta_payload["dataset"]["sha256"]) == 64
     assert isinstance(meta_payload["sha256"]["reference_csv"], str)
     assert len(meta_payload["sha256"]["reference_csv"]) == 64
 

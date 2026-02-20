@@ -329,3 +329,33 @@ def test_invalid_selection_or_missing_source_fail_with_system_exit(
     with pytest.raises(SystemExit) as exc2:
         promote_main()
     assert exc2.value.code == 1
+
+
+def test_promote_model_legacy_metadata_without_dataset_sha_adds_null_and_note(
+    tmp_path: Path,
+) -> None:
+    selection_path, models_root, out_dir = _build_basic_fixture(tmp_path)
+    legacy_metadata_path = models_root / "baseline_logreg" / "none" / "metadata.json"
+    legacy_payload = json.loads(legacy_metadata_path.read_text(encoding="utf-8"))
+    legacy_payload["dataset"] = {
+        "path_hint": "/private/tmp/secret/dataset.xlsx",
+        "basename": "dataset.xlsx",
+    }
+    _write_json(legacy_metadata_path, legacy_payload)
+
+    run_model_promotion(
+        selection_path=selection_path,
+        models_root=models_root,
+        out_dir=out_dir,
+        force=False,
+        backup=True,
+    )
+
+    promoted_metadata = json.loads((out_dir / "metadata.json").read_text(encoding="utf-8"))
+    assert "dataset" in promoted_metadata
+    assert promoted_metadata["dataset"]["sha256"] is None
+    assert promoted_metadata["dataset"]["path_hint"] == "dataset.xlsx"
+    assert any(
+        "dataset.sha256 unavailable in legacy metadata" in str(note)
+        for note in promoted_metadata.get("notes", [])
+    )
