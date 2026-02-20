@@ -659,6 +659,17 @@ Referências:
   - `app/model/promoted_model.json` registra vencedor, source/dest, hashes `sha256` e timestamp;
   - `app/model/backups/<timestamp>/` guarda snapshot do modelo anterior quando `--backup 1`.
 
+## Metadata do Modelo (Serving) (Fase 6)
+
+- O `metadata.json` de serving (`app/model/metadata.json`) segue schema mínimo validável para operação da API e monitoramento:
+  - identidade/versionamento do modelo (`model_family`, `variant`, `model_version`, `trained_at`, `promoted_at`);
+  - contrato de entrada e model frame (`expected_raw_cols`, `expected_model_cols`, `excluded_cols`);
+  - política de decisão (`threshold` operacional, `top-k` de contingência e threshold calibrado);
+  - métricas agregadas de treino/holdout e versões das bibliotecas.
+- O processo de promoção enriquece e valida o metadata antes de finalizar cópia para `app/model/`.
+- Comando oficial de validação:
+  - `python -m src.metadata_schema --path app/model/metadata.json`
+
 ## Checklist do Projeto - Datathon Machine Learning Engineering
 
 Este checklist foi elaborado considerando explicitamente as inconsistências reais do dataset fornecido (schemas distintos entre anos, colunas duplicadas, valores inválidos, mudanças semânticas de campos e interseção parcial de estudantes entre períodos). As etapas descritas adotam práticas de Data Engineering e MLOps para garantir robustez, reprodutibilidade e validade estatística do modelo em produção.
@@ -668,7 +679,7 @@ Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 Progresso geral (barra visual):
 `[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`74 de 110 tarefas concluídas (67.3%)`
+`75 de 110 tarefas concluídas (68.2%)`
 
 | Fase | Progresso |
 |---|---|
@@ -677,7 +688,7 @@ Progresso geral (barra visual):
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 14/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 10/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 17/17 |
-| Fase 6 - Artefatos, API e Deploy | 1/15 |
+| Fase 6 - Artefatos, API e Deploy | 2/15 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 2/13 |
 | Fase 8 - Documentação e Entrega Final | 10/21 |
 | Total | 74/110 |
@@ -763,9 +774,9 @@ Nota de shift temporal:
 - [x] Justificar escolha do modelo final
 - [x] Incluir validação de shift temporal do target e das features antes do treinamento final
 
-### Fase 6 - Artefatos, API e Deploy [1/15]
+### Fase 6 - Artefatos, API e Deploy [2/15]
 - [x] Salvar pipeline completa em `model.joblib`
-- [ ] Criar `metadata.json` com modelo, métricas, threshold, features esperadas, data do treino e versões das bibliotecas
+- [x] Criar `metadata.json` com modelo, métricas, threshold, features esperadas, data do treino e versões das bibliotecas
 - [ ] Salvar dados de referência para monitoramento de drift
 - [ ] Versionar dataset de treino/validação (`hash/checksum` + versão usada no experimento)
 - [ ] Definir schema formal de saída do modelo/API (probabilidade, classe prevista, threshold aplicado e versão do modelo)

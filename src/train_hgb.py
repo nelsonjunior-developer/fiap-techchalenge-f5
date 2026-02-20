@@ -6,7 +6,7 @@ import argparse
 import hashlib
 import inspect
 import json
-import platform
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -25,6 +25,7 @@ from src.preprocessing import (
     build_preprocessing_bundle,
     build_pruning_plan_from_training_frame,
 )
+from src.features import get_engineered_feature_names
 from src.metrics import (
     build_default_prediction_policy,
     compute_metrics_threshold,
@@ -157,7 +158,16 @@ def _build_evaluation_block(
 
 
 def _build_threshold_policy() -> dict[str, Any]:
+    notes = [
+        "Operational threshold is fixed (0.30).",
+        "Top-k is a batch/ranking policy used only when capacity cannot handle the fixed-threshold volume.",
+        "Holdout is evaluation-only and never used to choose thresholds.",
+    ]
     return {
+        "operational_fixed_threshold": float(_OPERATIONAL_THRESHOLD),
+        "recall_target_for_calibration": float(_CALIBRATION_RECALL_TARGET),
+        "calibrated_threshold": None,
+        "topk_fallback_fraction": float(_CAPACITY_TOPK_FRACTION),
         "operational": {
             "mode": "fixed",
             "threshold": float(_OPERATIONAL_THRESHOLD),
@@ -168,11 +178,7 @@ def _build_threshold_policy() -> dict[str, Any]:
             "topk_fraction": float(_CAPACITY_TOPK_FRACTION),
             "rule": "alert_top_20_percent_by_score",
         },
-        "notes": [
-            "Operational threshold is fixed (0.30).",
-            "Top-k is a batch/ranking policy used only when capacity cannot handle the fixed-threshold volume.",
-            "Holdout is evaluation-only and never used to choose thresholds.",
-        ],
+        "notes": notes,
     }
 
 
@@ -207,15 +213,55 @@ def _instantiate_hgb(
     return estimator, filtered, dropped
 
 
+def _build_feature_pruning_summary(plan: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "dropped_all_missing_cols_count": int(
+            len(plan.get("dropped_all_missing_cols", []))
+        ),
+        "dropped_constant_numeric_cols_count": int(
+            len(plan.get("dropped_constant_numeric_cols", []))
+        ),
+        "dropped_constant_categorical_cols_count": int(
+            len(plan.get("dropped_constant_categorical_cols", []))
+        ),
+        "dropped_high_cardinality_cols_count": int(
+            len(plan.get("dropped_high_cardinality_cols", []))
+        ),
+        "blocked_by_leakage_cols_count": int(
+            len(plan.get("blocked_by_leakage_cols", []))
+        ),
+        "dropped_excluded_cols_count": int(len(plan.get("dropped_excluded_cols", []))),
+    }
+
+
+def _extract_pair_years(pair: str, fallback_t: int, fallback_t1: int) -> tuple[int, int]:
+    raw = str(pair or "").strip()
+    if "->" not in raw:
+        return fallback_t, fallback_t1
+    left, right = raw.split("->", 1)
+    try:
+        return int(left.strip()), int(right.strip())
+    except ValueError:
+        return fallback_t, fallback_t1
+
+
 def _build_metadata_payload(
     *,
+    model_path: Path,
+    model_joblib_sha256: str,
+    model_family: str,
     variant: str,
     resolved_params: dict[str, Any],
     dropped_params: list[str],
     year_t: int,
     year_t1: int,
+    dataset_path_hint: str | None,
     enable_feature_engineering: bool,
     enable_age_bucket: bool,
+    expected_raw_cols: list[str],
+    expected_model_cols: list[str],
+    excluded_cols: list[str],
+    feature_pruning_plan: dict[str, Any],
     feature_pruning_plan_hash: str,
     dataset_basename: str | None,
     dataset_sha256: str | None,
@@ -226,14 +272,61 @@ def _build_metadata_payload(
     threshold_calibration: dict[str, Any],
     threshold_policy: dict[str, Any],
     sklearn_version: str,
+    joblib_version: str | None,
     class_imbalance_strategy: dict[str, Any],
     prediction_policy: dict[str, Any],
     evaluation_holdout_at_05: dict[str, Any] | None,
     evaluation_holdout_at_030: dict[str, Any] | None,
-    evaluation_holdout_at_threshold_selected: dict[str, Any] | None,
+    evaluation_holdout_at_calibrated_threshold: dict[str, Any] | None,
     topk_holdout_summary: dict[str, Any] | None,
     cv_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    trained_at = datetime.now(timezone.utc).isoformat()
+    model_version = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    engineered_names = get_engineered_feature_names(enable_age_bucket=enable_age_bucket)
+    engineered_cols: list[str] = []
+    if enable_feature_engineering:
+        engineered_cols = list(engineered_names["numeric"]) + list(
+            engineered_names["categorical"]
+        )
+
+    holdout_pair: dict[str, Any] | None = None
+    if isinstance(evaluation_holdout_at_030, dict):
+        holdout_year_t, holdout_year_t1 = _extract_pair_years(
+            str(evaluation_holdout_at_030.get("pair", "2023->2024")),
+            2023,
+            2024,
+        )
+        holdout_pair = {
+            "year_t": int(holdout_year_t),
+            "year_t1": int(holdout_year_t1),
+            "n": int(evaluation_holdout_at_030.get("n", 0)),
+            "n_pos": int(evaluation_holdout_at_030.get("n_pos", 0)),
+            "prevalence": float(evaluation_holdout_at_030.get("prevalence", 0.0)),
+        }
+
+    threshold_policy_payload = dict(threshold_policy)
+    threshold_policy_payload["operational_fixed_threshold"] = float(
+        _OPERATIONAL_THRESHOLD
+    )
+    threshold_policy_payload["recall_target_for_calibration"] = float(
+        _CALIBRATION_RECALL_TARGET
+    )
+    threshold_policy_payload["calibrated_threshold"] = float(
+        threshold_calibration.get("threshold_selected")
+    )
+    threshold_policy_payload["topk_fallback_fraction"] = float(_CAPACITY_TOPK_FRACTION)
+
+    versions_payload = {
+        "python": sys.version.split(" ")[0],
+        "pandas": pd.__version__,
+        "numpy": np.__version__,
+        "scikit_learn": sklearn_version,
+        "joblib": joblib_version,
+        # Backward compatibility with older metadata consumers.
+        "sklearn": sklearn_version,
+    }
+
     notes = [
         "operational default policy uses fixed threshold=0.30 for recall-focused mode",
         "threshold_calibration is train-only evidence and does not replace operational threshold",
@@ -245,10 +338,40 @@ def _build_metadata_payload(
         notes.append("holdout evaluation disabled by flag")
 
     payload = {
+        "model_family": model_family,
         "model_kind": "HistGradientBoostingClassifier",
         "variant": variant,
+        "model_version": model_version,
+        "trained_at": trained_at,
+        "promoted_at": None,
+        "random_state": int(RANDOM_STATE),
         "resolved_params": resolved_params,
-        "train_pair": {"year_t": year_t, "year_t1": year_t1},
+        "train_pair": {
+            "year_t": int(year_t),
+            "year_t1": int(year_t1),
+            "n": int(evaluation_train_at_030.get("n", n_samples_train)),
+            "n_pos": int(evaluation_train_at_030.get("n_pos", 0)),
+            "prevalence": float(evaluation_train_at_030.get("prevalence", y_prevalence)),
+        },
+        "holdout_pair": holdout_pair,
+        "dataset": {
+            "path_hint": dataset_path_hint,
+            "basename": dataset_basename,
+            "sha256": dataset_sha256,
+        },
+        "expected_raw_cols": list(expected_raw_cols),
+        "expected_model_cols": list(expected_model_cols),
+        "excluded_cols": list(excluded_cols),
+        "feature_engineering": {
+            "enabled": bool(enable_feature_engineering),
+            "enable_age_bucket": bool(enable_age_bucket),
+            "engineered_cols": engineered_cols,
+        },
+        "feature_pruning": {
+            "plan_hash": feature_pruning_plan_hash,
+            "kept_model_cols_count": int(len(expected_model_cols)),
+            "dropped_summary": _build_feature_pruning_summary(feature_pruning_plan),
+        },
         "scaler_strategy": "none",
         "enable_feature_engineering": bool(enable_feature_engineering),
         "enable_age_bucket": bool(enable_age_bucket),
@@ -270,19 +393,21 @@ def _build_metadata_payload(
         "evaluation_train_at_0.30": evaluation_train_at_030,
         "evaluation_holdout_at_0.5": evaluation_holdout_at_05,
         "evaluation_holdout_at_0.30": evaluation_holdout_at_030,
-        "evaluation_holdout_at_threshold_selected": evaluation_holdout_at_threshold_selected,
-        "threshold_policy": threshold_policy,
+        "evaluation_holdout_at_calibrated_threshold": evaluation_holdout_at_calibrated_threshold,
+        "evaluation_holdout_at_threshold_selected": evaluation_holdout_at_calibrated_threshold,
+        "threshold_policy": threshold_policy_payload,
         "threshold_calibration": threshold_calibration,
         "topk_holdout_summary": topk_holdout_summary,
         "class_imbalance_strategy": class_imbalance_strategy,
         "prediction_policy": prediction_policy,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "versions": {
-            "python": platform.python_version(),
-            "pandas": pd.__version__,
-            "sklearn": sklearn_version,
+        "created_at": trained_at,
+        "versions": versions_payload,
+        "artifact_hashes": {
+            "model_joblib_sha256": model_joblib_sha256,
+            "metadata_sha256": None,
         },
         "notes": notes,
+        "path_model": str(model_path),
     }
     forbidden_present = _FORBIDDEN_METADATA_KEYS & set(payload.keys())
     if forbidden_present:
@@ -415,6 +540,7 @@ def run_hgb_training(
         enable_age_bucket=enable_age_bucket,
     )
     expected_raw_cols = list(raw_bundle["expected_raw_cols"])
+    excluded_cols = list(raw_bundle.get("excluded_cols", []))
     X_raw_train = build_raw_from_ids(yearly_frames[year_t], ids, expected_raw_cols)
     if len(X_raw_train) != len(y_train):
         raise ValueError("Inconsistent training rows between X_raw_train and y_train.")
@@ -445,6 +571,7 @@ def run_hgb_training(
     )
     if not feature_pruning_plan.get("kept_model_cols"):
         raise ValueError("Feature pruning plan produced empty kept_model_cols.")
+    expected_model_cols = list(feature_pruning_plan.get("kept_model_cols", []))
 
     pruning_hash = _hash_pruning_plan(feature_pruning_plan)
     dataset_basename = resolved_dataset_path.name
@@ -579,16 +706,27 @@ def run_hgb_training(
             model_path = variant_dir / "model.joblib"
             metadata_path = variant_dir / "metadata.json"
             deps["joblib"].dump(pipeline, model_path)
+            model_joblib_sha256 = _compute_sha256(model_path)
+            if not model_joblib_sha256:
+                raise ValueError(f"Unable to compute model sha256: {model_path}")
             metadata_path_by_variant[variant] = metadata_path
 
             metadata_payload_by_variant[variant] = {
+                "model_path": model_path,
+                "model_joblib_sha256": model_joblib_sha256,
+                "model_family": "nonlinear_hgb",
                 "variant": variant,
                 "resolved_params": resolved_params,
                 "dropped_params": dropped_params,
                 "year_t": year_t,
                 "year_t1": year_t1,
+                "dataset_path_hint": str(resolved_dataset_path),
                 "enable_feature_engineering": enable_feature_engineering,
                 "enable_age_bucket": enable_age_bucket,
+                "expected_raw_cols": expected_raw_cols,
+                "expected_model_cols": expected_model_cols,
+                "excluded_cols": excluded_cols,
+                "feature_pruning_plan": feature_pruning_plan,
                 "feature_pruning_plan_hash": pruning_hash,
                 "dataset_basename": dataset_basename,
                 "dataset_sha256": dataset_sha256,
@@ -599,9 +737,14 @@ def run_hgb_training(
                 "threshold_calibration": threshold_calibration,
                 "evaluation_holdout_at_05": evaluation_holdout_at_05,
                 "evaluation_holdout_at_030": evaluation_holdout_at_030,
-                "evaluation_holdout_at_threshold_selected": evaluation_holdout_at_threshold_selected,
+                "evaluation_holdout_at_calibrated_threshold": evaluation_holdout_at_threshold_selected,
                 "topk_holdout_summary": topk_holdout_summary,
                 "sklearn_version": str(deps["sklearn_version"]),
+                "joblib_version": (
+                    str(getattr(deps["joblib"], "__version__", ""))
+                    if getattr(deps["joblib"], "__version__", None) is not None
+                    else None
+                ),
             }
 
             successes[variant] = {
@@ -674,13 +817,21 @@ def run_hgb_training(
     for variant in successes:
         base_payload = metadata_payload_by_variant[variant]
         metadata_payload = _build_metadata_payload(
+            model_path=base_payload["model_path"],
+            model_joblib_sha256=base_payload["model_joblib_sha256"],
+            model_family=base_payload["model_family"],
             variant=base_payload["variant"],
             resolved_params=base_payload["resolved_params"],
             dropped_params=base_payload["dropped_params"],
             year_t=base_payload["year_t"],
             year_t1=base_payload["year_t1"],
+            dataset_path_hint=base_payload["dataset_path_hint"],
             enable_feature_engineering=base_payload["enable_feature_engineering"],
             enable_age_bucket=base_payload["enable_age_bucket"],
+            expected_raw_cols=base_payload["expected_raw_cols"],
+            expected_model_cols=base_payload["expected_model_cols"],
+            excluded_cols=base_payload["excluded_cols"],
+            feature_pruning_plan=base_payload["feature_pruning_plan"],
             feature_pruning_plan_hash=base_payload["feature_pruning_plan_hash"],
             dataset_basename=base_payload["dataset_basename"],
             dataset_sha256=base_payload["dataset_sha256"],
@@ -691,12 +842,13 @@ def run_hgb_training(
             threshold_calibration=base_payload["threshold_calibration"],
             threshold_policy=threshold_policy,
             sklearn_version=base_payload["sklearn_version"],
+            joblib_version=base_payload["joblib_version"],
             class_imbalance_strategy=strategy_block,
             prediction_policy=prediction_policy,
             evaluation_holdout_at_05=base_payload["evaluation_holdout_at_05"],
             evaluation_holdout_at_030=base_payload["evaluation_holdout_at_030"],
-            evaluation_holdout_at_threshold_selected=base_payload[
-                "evaluation_holdout_at_threshold_selected"
+            evaluation_holdout_at_calibrated_threshold=base_payload[
+                "evaluation_holdout_at_calibrated_threshold"
             ],
             topk_holdout_summary=base_payload["topk_holdout_summary"],
             cv_result=cv_payload_by_variant.get(variant),

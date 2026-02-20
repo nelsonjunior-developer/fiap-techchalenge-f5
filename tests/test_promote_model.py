@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from src.metadata_schema import validate_metadata
 from src.promote_model import main as promote_main
 from src.promote_model import run_model_promotion
 
@@ -21,6 +22,159 @@ def _sha256_bytes(payload: bytes) -> str:
     return digest.hexdigest()
 
 
+def _collect_lower_keys(payload: object) -> set[str]:
+    keys: set[str] = set()
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            keys.add(str(key).lower())
+            keys |= _collect_lower_keys(value)
+    elif isinstance(payload, list):
+        for item in payload:
+            keys |= _collect_lower_keys(item)
+    return keys
+
+
+def _build_valid_source_metadata(variant: str = "none") -> dict[str, object]:
+    eval_train_05 = {
+        "threshold": 0.5,
+        "metrics": {
+            "recall": 0.70,
+            "precision": 0.65,
+            "f1": 0.67,
+            "roc_auc": 0.74,
+            "pr_auc": 0.71,
+            "positive_rate": 0.40,
+        },
+        "confusion_matrix": {"tn": 10, "fp": 4, "fn": 3, "tp": 8},
+    }
+    eval_train_030 = {
+        "threshold": 0.30,
+        "metrics": {
+            "recall": 0.85,
+            "precision": 0.60,
+            "f1": 0.70,
+            "roc_auc": 0.74,
+            "pr_auc": 0.71,
+            "positive_rate": 0.55,
+        },
+        "confusion_matrix": {"tn": 8, "fp": 6, "fn": 2, "tp": 9},
+    }
+    eval_holdout_05 = {
+        "threshold": 0.5,
+        "metrics": {
+            "recall": 0.58,
+            "precision": 0.62,
+            "f1": 0.60,
+            "roc_auc": 0.69,
+            "pr_auc": 0.64,
+            "positive_rate": 0.38,
+        },
+        "confusion_matrix": {"tn": 9, "fp": 5, "fn": 6, "tp": 8},
+    }
+    eval_holdout_030 = {
+        "threshold": 0.3,
+        "metrics": {
+            "recall": 0.72,
+            "precision": 0.57,
+            "f1": 0.64,
+            "roc_auc": 0.69,
+            "pr_auc": 0.64,
+            "positive_rate": 0.54,
+        },
+        "confusion_matrix": {"tn": 7, "fp": 7, "fn": 4, "tp": 10},
+    }
+    eval_holdout_calibrated = {
+        "threshold": 0.28,
+        "metrics": {
+            "recall": 0.75,
+            "precision": 0.55,
+            "f1": 0.63,
+            "roc_auc": 0.69,
+            "pr_auc": 0.64,
+            "positive_rate": 0.58,
+        },
+        "confusion_matrix": {"tn": 6, "fp": 8, "fn": 3, "tp": 11},
+    }
+    return {
+        "model_family": "baseline_logreg",
+        "model_kind": "LogisticRegression",
+        "variant": variant,
+        "model_version": "2026-02-20T12-00-00Z",
+        "trained_at": "2026-02-20T12:00:00+00:00",
+        "promoted_at": None,
+        "random_state": 42,
+        "train_pair": {
+            "year_t": 2022,
+            "year_t1": 2023,
+            "n": 25,
+            "n_pos": 11,
+            "prevalence": 0.44,
+        },
+        "holdout_pair": {
+            "year_t": 2023,
+            "year_t1": 2024,
+            "n": 28,
+            "n_pos": 14,
+            "prevalence": 0.50,
+        },
+        "dataset": {
+            "path_hint": "dataset/PEDE_PASSOS_DATASET_FIAP.xlsx",
+            "basename": "PEDE_PASSOS_DATASET_FIAP.xlsx",
+            "sha256": None,
+        },
+        "expected_raw_cols": ["Idade", "INDE", "Mat", "Por", "Ing"],
+        "expected_model_cols": ["Idade", "INDE", "Mat", "Por", "Ing"],
+        "excluded_cols": ["Nome_Anon", "Avaliador1"],
+        "feature_engineering": {
+            "enabled": False,
+            "enable_age_bucket": False,
+            "engineered_cols": [],
+        },
+        "feature_pruning": {
+            "plan_hash": "abc123",
+            "kept_model_cols_count": 5,
+            "dropped_summary": {"dropped_all_missing_cols_count": 0},
+        },
+        "threshold_policy": {
+            "operational_fixed_threshold": 0.30,
+            "recall_target_for_calibration": 0.90,
+            "calibrated_threshold": 0.28,
+            "topk_fallback_fraction": 0.20,
+            "operational": {"mode": "fixed", "threshold": 0.30, "rule": "alert_if_proba>=0.30"},
+            "capacity_fallback": {
+                "mode": "topk",
+                "topk_fraction": 0.20,
+                "rule": "alert_top_20_percent_by_score",
+            },
+            "notes": ["Top-k is batch only."],
+        },
+        "evaluation_train": eval_train_05,
+        "evaluation_holdout": eval_holdout_05,
+        "evaluation_train_at_0.5": eval_train_05,
+        "evaluation_train_at_0.30": eval_train_030,
+        "evaluation_holdout_at_0.5": eval_holdout_05,
+        "evaluation_holdout_at_0.30": eval_holdout_030,
+        "evaluation_holdout_at_calibrated_threshold": eval_holdout_calibrated,
+        "threshold_calibration": {
+            "threshold_selected": 0.28,
+            "recall_target": 0.90,
+            "selection_rule": "max_precision_subject_to_recall>=0.90",
+        },
+        "versions": {
+            "python": "3.11.10",
+            "pandas": "2.2.2",
+            "numpy": "1.26.4",
+            "scikit_learn": None,
+            "joblib": None,
+            "sklearn": None,
+        },
+        "artifact_hashes": {
+            "model_joblib_sha256": "0" * 64,
+            "metadata_sha256": None,
+        },
+    }
+
+
 def _build_basic_fixture(root: Path) -> tuple[Path, Path, Path]:
     selection_path = root / "artifacts" / "model_selection.json"
     models_root = root / "artifacts" / "models"
@@ -28,7 +182,7 @@ def _build_basic_fixture(root: Path) -> tuple[Path, Path, Path]:
     variant_dir.mkdir(parents=True, exist_ok=True)
 
     (variant_dir / "model.joblib").write_bytes(b"MODEL_V1")
-    _write_json(variant_dir / "metadata.json", {"model_kind": "LogisticRegression", "variant": "none"})
+    _write_json(variant_dir / "metadata.json", _build_valid_source_metadata("none"))
     _write_json(
         selection_path,
         {
@@ -66,6 +220,12 @@ def test_promote_model_happy_path(tmp_path: Path) -> None:
     assert isinstance(promoted_payload["sha256"]["metadata"], str)
     assert len(promoted_payload["sha256"]["metadata"]) == 64
     assert promoted["dest_paths"]["model"] == str(dest_model)
+
+    promoted_metadata = json.loads(dest_meta.read_text(encoding="utf-8"))
+    ok, errors = validate_metadata(promoted_metadata)
+    assert ok, errors
+    forbidden_keys = {"ids", "ra_list", "students", "records"}
+    assert forbidden_keys.isdisjoint(_collect_lower_keys(promoted_metadata))
 
 
 def test_destination_exists_without_force_exits_nonzero(
