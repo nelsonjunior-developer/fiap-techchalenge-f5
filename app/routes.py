@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
 
 import numpy as np
 from fastapi import APIRouter, Body, HTTPException
@@ -15,10 +14,12 @@ from app.predict_utils import (
     normalize_records,
     validate_required_columns,
 )
+from app.request_schemas import PredictRequest
 from app.schemas import PredictResponse, PredictionResult
 from src.decision import decide_risk_class
 
 router = APIRouter()
+MAX_BATCH_SIZE = 500
 
 
 def _dedupe_notes(notes: list[str]) -> list[str]:
@@ -58,11 +59,20 @@ def version() -> dict[str, object]:
 
 
 @router.post("/predict", response_model=PredictResponse)
-def predict(payload: Any = Body(...)) -> PredictResponse:
+def predict(payload: PredictRequest = Body(...)) -> PredictResponse:
     try:
         records = normalize_records(payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if len(records) > MAX_BATCH_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "detail": "batch too large",
+                "max_batch_size": int(MAX_BATCH_SIZE),
+                "received": int(len(records)),
+            },
+        )
 
     context = deps.get_prediction_context()
     model, model_status = deps.get_model()

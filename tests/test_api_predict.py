@@ -64,8 +64,11 @@ def test_predict_returns_503_when_service_not_ready(monkeypatch: pytest.MonkeyPa
 
 def test_predict_invalid_structural_payload_returns_400() -> None:
     status, body = _post_json({"records": "x"})
-    assert status == 400
-    assert "payload must be a dict" in str(body["detail"])
+    if TestClient is None:
+        assert status == 400
+        assert "payload must be a dict" in str(body["detail"])
+        return
+    assert status == 422
 
 
 def test_predict_missing_required_columns_returns_400(
@@ -124,3 +127,17 @@ def test_predict_supports_batch_and_envelope(monkeypatch: pytest.MonkeyPatch) ->
     assert body_batch["count"] == 2
     assert status_envelope == 200
     assert body_envelope["count"] == 2
+
+
+def test_predict_batch_too_large_returns_400(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.routes.deps.get_prediction_context", lambda: _ctx(["a", "b"]))
+    monkeypatch.setattr(
+        "app.routes.deps.get_model",
+        lambda: (DummyModel(), {"model_loaded": True, "notes": ["model_loaded"]}),
+    )
+    rows = [{"a": 1, "b": 2}] * 501
+    status, body = _post_json(rows)
+    assert status == 400
+    detail = body["detail"]
+    assert detail["detail"] == "batch too large"
+    assert detail["max_batch_size"] == 500

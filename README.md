@@ -770,9 +770,12 @@ Exemplo `GET /version` (sem metadata carregado):
   - envelope (`{"records":[{...},{...}]}`)
 - Regras de validação:
   - base obrigatória: `expected_raw_cols` do metadata de serving
+  - estrutura do body validada por Pydantic (single, batch, envelope)
   - extras não suspeitas: permitidas e ignoradas no reindex
   - extras leakage-like: bloqueadas com `400`
   - faltantes: `400` com `missing_columns`
+  - batch acima do limite: `400` (`batch too large`)
+  - body/JSON/tipo inválido: `422` (FastAPI/Pydantic)
   - metadata/model indisponíveis: `503`
 
 Exemplo `curl` (single):
@@ -839,7 +842,7 @@ Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 Progresso geral (barra visual):
 `[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`81 de 110 tarefas concluídas (73.6%)`
+`82 de 110 tarefas concluídas (74.5%)`
 
 | Fase | Progresso |
 |---|---|
@@ -848,10 +851,10 @@ Progresso geral (barra visual):
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 14/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 10/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 17/17 |
-| Fase 6 - Artefatos, API e Deploy | 8/15 |
+| Fase 6 - Artefatos, API e Deploy | 9/15 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 2/13 |
 | Fase 8 - Documentação e Entrega Final | 10/21 |
-| Total | 81/110 |
+| Total | 82/110 |
 
 Nota:
 - A `Fase 9` é opcional e fica fora da contagem oficial de progresso (`barra`, `X/Y` e `%`).
@@ -937,7 +940,7 @@ Nota de shift temporal:
 - [x] Justificar escolha do modelo final
 - [x] Incluir validação de shift temporal do target e das features antes do treinamento final
 
-### Fase 6 - Artefatos, API e Deploy [8/15]
+### Fase 6 - Artefatos, API e Deploy [9/15]
 - [x] Salvar pipeline completa em `model.joblib`
 - [x] Criar `metadata.json` com modelo, métricas, threshold, features esperadas, data do treino e versões das bibliotecas
 - [x] Salvar dados de referência para monitoramento de drift
@@ -946,7 +949,7 @@ Nota de shift temporal:
 - [x] Criar aplicação FastAPI
 - [x] Implementar endpoint `POST /predict`
 - [x] Implementar `GET /health` e `GET /version`
-- [ ] Validar entradas com Pydantic
+- [x] Validar entradas com Pydantic
 - [ ] Garantir carregamento do modelo salvo
 - [ ] Criar Dockerfile enxuto baseado em `python:slim`
 - [ ] Documentar comandos de build e run no README

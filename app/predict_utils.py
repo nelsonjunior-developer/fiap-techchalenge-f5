@@ -6,27 +6,45 @@ from typing import Any
 
 import pandas as pd
 
+from app.request_schemas import RecordModel, RecordsEnvelope
 from src.leakage import detect_leakage_columns
 
 
 def normalize_records(payload: Any) -> list[dict[str, Any]]:
     """Normalize payload into list[dict] supporting dict/list/envelope formats."""
-    records: Any
+    records: list[dict[str, Any]]
+    if isinstance(payload, RecordsEnvelope):
+        records = [record.to_dict() for record in payload.records]
+        return records
+
+    if isinstance(payload, RecordModel):
+        return [payload.to_dict()]
+
+    if isinstance(payload, list):
+        resolved: list[dict[str, Any]] = []
+        for item in payload:
+            if isinstance(item, RecordModel):
+                resolved.append(item.to_dict())
+            elif isinstance(item, dict):
+                resolved.append(dict(item))
+            else:
+                raise ValueError("payload records must be objects")
+        return resolved
+
     if isinstance(payload, dict):
         if "records" in payload:
-            records = payload["records"]
+            records_payload = payload["records"]
+            if not isinstance(records_payload, list):
+                raise ValueError(
+                    "payload must be a dict, a list of dicts, or {'records': [...]}"
+                )
+            if any(not isinstance(item, dict) for item in records_payload):
+                raise ValueError("payload records must be objects")
+            return [dict(item) for item in records_payload]
         else:
-            records = [payload]
-    elif isinstance(payload, list):
-        records = payload
-    else:
-        raise ValueError("payload must be a dict, a list of dicts, or {'records': [...]}")
+            return [dict(payload)]
 
-    if not isinstance(records, list):
-        raise ValueError("payload must be a dict, a list of dicts, or {'records': [...]}")
-    if any(not isinstance(item, dict) for item in records):
-        raise ValueError("payload records must be objects")
-    return list(records)
+    raise ValueError("payload must be a dict, a list of dicts, or {'records': [...]}")
 
 
 def build_raw_dataframe(records: list[dict[str, Any]]) -> pd.DataFrame:
@@ -71,4 +89,3 @@ __all__ = [
     "normalize_records",
     "validate_required_columns",
 ]
-
