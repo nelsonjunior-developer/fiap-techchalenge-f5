@@ -604,6 +604,12 @@ Referências:
   - maior `Recall`, depois maior `PR-AUC`, depois menor `positive_rate`, com desempate lexicográfico (`model_family/variant`).
 - Se ninguém passar os gates, o processo escolhe o maior `Recall` com status `WARNING` e justificativa explícita no artefato.
 
+## Justificativa da Escolha do Modelo Final (Fase 5)
+
+- O modelo final é justificado a partir de `artifacts/model_selection.json` (fonte única da decisão formal).
+- A justificativa para a banca fica versionada em `docs/model_final_justification.md` e pode ser regenerada por `python -m src.model_justification`.
+- Critério oficial: `Recall` no holdout como métrica primária, `PR-AUC` como secundária e `positive_rate` como desempate, com threshold preferencial `0.30` (fallback `0.5` com `WARNING`).
+
 ## Avaliação Holdout Temporal (Fase 5)
 
 - A avaliação `2023->2024` é estritamente read-only: o modelo é treinado em `2022->2023` e apenas inferido no holdout.
@@ -628,9 +634,9 @@ Este checklist foi elaborado considerando explicitamente as inconsistências rea
 Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 
 Progresso geral (barra visual):
-`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
+`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`71 de 110 tarefas concluídas (64.5%)`
+`72 de 110 tarefas concluídas (65.5%)`
 
 | Fase | Progresso |
 |---|---|
@@ -638,11 +644,11 @@ Progresso geral (barra visual):
 | Fase 2 - Organização do Projeto e Ambiente | 7/7 |
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 14/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 10/10 |
-| Fase 5 - Pipeline, Treinamento e Avaliação | 15/17 |
+| Fase 5 - Pipeline, Treinamento e Avaliação | 16/17 |
 | Fase 6 - Artefatos, API e Deploy | 0/15 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 2/13 |
 | Fase 8 - Documentação e Entrega Final | 10/21 |
-| Total | 71/110 |
+| Total | 72/110 |
 
 ### Fase 1 - Entendimento do Problema e Target [13/13]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
@@ -703,7 +709,7 @@ Nota de coorte temporal:
 - [x] Garantir que nenhuma feature use informação futura
 - [x] Documentar as principais decisões de feature engineering
 
-### Fase 5 - Pipeline, Treinamento e Avaliação [15/17]
+### Fase 5 - Pipeline, Treinamento e Avaliação [16/17]
 Nota de shift temporal:
 > Antes do treinamento final, é realizada uma análise de shift temporal do target e das features, uma vez que a prevalência da classe positiva varia significativamente entre os períodos analisados (aprox. `61%` para `40%`).
 
@@ -722,7 +728,7 @@ Nota de shift temporal:
 - [x] Gerar matriz de confusão
 - [x] Definir threshold operacional focado em Recall
 - [x] Definir critério objetivo formal de seleção do modelo final (ex.: maior Recall com PR-AUC acima de limiar mínimo)
-- [ ] Justificar escolha do modelo final
+- [x] Justificar escolha do modelo final
 - [ ] Incluir validação de shift temporal do target e das features antes do treinamento final
 
 ### Fase 6 - Artefatos, API e Deploy [0/15]
