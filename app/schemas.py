@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Literal, Mapping, Optional, Sequence
 
 from pydantic import BaseModel, Field, ValidationError, confloat, root_validator, validator
+from src.decision import decide_risk_class
 from src.serving_context import (
     extract_model_identity,
     extract_operational_threshold,
@@ -65,14 +66,8 @@ def resolve_prediction_context(metadata: Mapping[str, Any] | None) -> tuple[dict
 
 
 def derive_risk_class(*, risk_proba: float, threshold_applied: float) -> int:
-    """Derive binary class from probability and threshold."""
-    probability = float(risk_proba)
-    threshold = float(threshold_applied)
-    if probability < 0.0 or probability > 1.0:
-        raise ValueError("risk_proba must be within [0,1].")
-    if threshold < 0.0 or threshold > 1.0:
-        raise ValueError("threshold_applied must be within [0,1].")
-    return 1 if probability >= threshold else 0
+    """Backward-compatible wrapper over src.decision.decide_risk_class."""
+    return decide_risk_class(risk_proba=risk_proba, threshold=threshold_applied)
 
 
 class PredictionResult(BaseModel):

@@ -762,7 +762,44 @@ Exemplo `GET /version` (sem metadata carregado):
 }
 ```
 
-Exemplo de resposta (batch):
+## POST /predict (Fase 6)
+
+- Formatos aceitos no body:
+  - registro único (`{...}`)
+  - lista de registros (`[{...},{...}]`)
+  - envelope (`{"records":[{...},{...}]}`)
+- Regras de validação:
+  - base obrigatória: `expected_raw_cols` do metadata de serving
+  - extras não suspeitas: permitidas e ignoradas no reindex
+  - extras leakage-like: bloqueadas com `400`
+  - faltantes: `400` com `missing_columns`
+  - metadata/model indisponíveis: `503`
+
+Exemplo `curl` (single):
+
+```bash
+curl -X POST http://127.0.0.1:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"a":1,"b":2}'
+```
+
+Exemplo `curl` (batch):
+
+```bash
+curl -X POST http://127.0.0.1:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '[{"a":1,"b":2},{"a":3,"b":4}]'
+```
+
+Exemplo `curl` (envelope):
+
+```bash
+curl -X POST http://127.0.0.1:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"records":[{"a":1,"b":2},{"a":3,"b":4}]}'
+```
+
+Exemplo de resposta:
 
 ```json
 {
@@ -802,7 +839,7 @@ Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 Progresso geral (barra visual):
 `[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`80 de 110 tarefas concluídas (72.7%)`
+`81 de 110 tarefas concluídas (73.6%)`
 
 | Fase | Progresso |
 |---|---|
@@ -811,10 +848,10 @@ Progresso geral (barra visual):
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 14/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 10/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 17/17 |
-| Fase 6 - Artefatos, API e Deploy | 7/15 |
+| Fase 6 - Artefatos, API e Deploy | 8/15 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 2/13 |
 | Fase 8 - Documentação e Entrega Final | 10/21 |
-| Total | 80/110 |
+| Total | 81/110 |
 
 Nota:
 - A `Fase 9` é opcional e fica fora da contagem oficial de progresso (`barra`, `X/Y` e `%`).
@@ -900,14 +937,14 @@ Nota de shift temporal:
 - [x] Justificar escolha do modelo final
 - [x] Incluir validação de shift temporal do target e das features antes do treinamento final
 
-### Fase 6 - Artefatos, API e Deploy [7/15]
+### Fase 6 - Artefatos, API e Deploy [8/15]
 - [x] Salvar pipeline completa em `model.joblib`
 - [x] Criar `metadata.json` com modelo, métricas, threshold, features esperadas, data do treino e versões das bibliotecas
 - [x] Salvar dados de referência para monitoramento de drift
 - [x] Versionar dataset de treino/validação (`hash/checksum` + versão usada no experimento)
 - [x] Definir schema formal de saída do modelo/API (probabilidade, classe prevista, threshold aplicado e versão do modelo)
 - [x] Criar aplicação FastAPI
-- [ ] Implementar endpoint `POST /predict`
+- [x] Implementar endpoint `POST /predict`
 - [x] Implementar `GET /health` e `GET /version`
 - [ ] Validar entradas com Pydantic
 - [ ] Garantir carregamento do modelo salvo
