@@ -41,6 +41,11 @@ artifacts/*
 app/model/model.joblib
 app/model/metadata.json
 app/model/backups/
+app/model/reference/reference_model_frame.csv
+app/model/reference/reference_profile.json
+app/model/reference/reference_meta.json
+app/model/reference/reference_raw_diagnostic.csv
+app/model/reference/backups/
 
 # Build/distribuicao
 build/
