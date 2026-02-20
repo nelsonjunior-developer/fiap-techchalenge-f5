@@ -7,6 +7,7 @@ import pytest
 from src.metrics import (
     build_default_prediction_policy,
     compute_classification_metrics_at_threshold,
+    compute_confusion_counts_at_threshold,
     compute_metrics_threshold,
     compute_metrics_topk,
     compute_prevalence,
@@ -36,15 +37,33 @@ def test_compute_classification_metrics_at_threshold_contains_counts() -> None:
     assert metrics["prevalence"] == pytest.approx(0.5)
     assert metrics["positive_rate"] == pytest.approx(0.75)
     assert metrics["notes"] == []
+    assert metrics["confusion_matrix"] == {"tn": 1, "fp": 1, "fn": 0, "tp": 2}
 
 
 def test_compute_classification_metrics_single_class_sets_auc_none() -> None:
     y_true = pd.Series([1, 1, 1], dtype="Int64")
-    y_score = np.array([0.9, 0.7, 0.8], dtype=float)
+    y_score = np.array([0.2, 0.7, 0.9], dtype=float)
     metrics = compute_classification_metrics_at_threshold(y_true, y_score, threshold=0.5)
     assert metrics["roc_auc"] is None
     assert metrics["pr_auc"] is None
     assert "single_class_target" in metrics["notes"]
+    assert metrics["confusion_matrix"] == {"tn": 0, "fp": 0, "fn": 1, "tp": 2}
+
+
+def test_compute_confusion_counts_at_threshold_basic() -> None:
+    y_true = pd.Series([0, 0, 1, 1], dtype="Int64")
+    y_score = np.array([0.1, 0.6, 0.4, 0.9], dtype=float)
+    cm = compute_confusion_counts_at_threshold(y_true, y_score, threshold=0.5)
+    assert cm == {"tn": 1, "fp": 1, "fn": 1, "tp": 1}
+    assert sum(cm.values()) == 4
+
+
+def test_compute_confusion_counts_at_threshold_single_class() -> None:
+    y_true = pd.Series([1, 1, 1], dtype="Int64")
+    y_score = np.array([0.2, 0.7, 0.9], dtype=float)
+    cm = compute_confusion_counts_at_threshold(y_true, y_score, threshold=0.5)
+    assert cm == {"tn": 0, "fp": 0, "fn": 1, "tp": 2}
+    assert all(isinstance(value, int) for value in cm.values())
 
 
 def test_compute_metrics_topk_frac_and_abs() -> None:
@@ -86,3 +105,15 @@ def test_privacy_aggregated_only() -> None:
 def test_summarize_proba_expected_keys() -> None:
     summary = summarize_proba(np.array([0.1, 0.3, 0.7, 0.9], dtype=float))
     assert set(summary.keys()) == {"min", "mean", "p50", "p95", "max"}
+
+
+def test_build_default_prediction_policy_defaults_to_threshold() -> None:
+    policy = build_default_prediction_policy()
+    assert policy["kind"] == "threshold"
+    assert policy["threshold"] == pytest.approx(0.30)
+    assert policy["k_frac"] == pytest.approx(0.20)
+
+
+def test_build_default_prediction_policy_rejects_invalid_kind() -> None:
+    with pytest.raises(ValueError, match="kind must be one of"):
+        build_default_prediction_policy(kind="invalid")

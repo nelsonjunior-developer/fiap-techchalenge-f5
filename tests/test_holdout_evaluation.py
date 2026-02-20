@@ -140,6 +140,7 @@ def test_train_baseline_metadata_contains_evaluation_holdout(
     holdout = payload.get("evaluation_holdout")
     assert isinstance(holdout, dict)
     assert set(holdout.keys()) >= {"pair", "n", "n_pos", "prevalence", "metrics"}
+    assert set(holdout["confusion_matrix_at_0.5"].keys()) == {"tn", "fp", "fn", "tp"}
     assert payload.get("metrics_holdout_at_0.5") is not None
 
 

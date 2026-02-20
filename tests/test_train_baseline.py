@@ -161,6 +161,9 @@ def test_train_baseline_saves_artifacts_and_metadata_without_pii(
     assert "prediction_policy" in payload
     assert isinstance(payload.get("evaluation_train"), dict)
     assert payload.get("evaluation_holdout") is None
+    cm = payload["evaluation_train"]["confusion_matrix_at_0.5"]
+    assert set(cm.keys()) == {"tn", "fp", "fn", "tp"}
+    assert sum(int(cm[k]) for k in ("tn", "fp", "fn", "tp")) == 20
 
     loaded_pipeline = _FakeJoblib.load(model_path)
     sample_raw = fake_frames[2022].loc[:, prep.get_expected_raw_feature_columns()].head(3)
@@ -172,7 +175,7 @@ def test_train_baseline_roundtrip_with_real_sklearn_if_available(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    sklearn = pytest.importorskip("sklearn")
+    pytest.importorskip("sklearn")
     joblib = pytest.importorskip("joblib")
     fake_frames = _build_fake_yearly_frames()
     fake_dataset = tmp_path / "fake_dataset.xlsx"
@@ -193,14 +196,23 @@ def test_train_baseline_roundtrip_with_real_sklearn_if_available(
         variants="none",
         enable_feature_engineering=False,
         enable_age_bucket=False,
-        eval_holdout=False,
+        eval_holdout=True,
         strict=True,
     )
     model_path = Path(report["variants"]["none"]["model_path"])
+    metadata_path = Path(report["variants"]["none"]["metadata_path"])
     loaded = joblib.load(model_path)
     sample_raw = fake_frames[2022].loc[:, prep.get_expected_raw_feature_columns()].head(3)
     probs = loaded.predict_proba(sample_raw)
     assert probs.shape == (3, 2)
+
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert "threshold_policy" in payload
+    assert "threshold_calibration" in payload
+    assert "evaluation_train_at_0.30" in payload
+    assert "evaluation_holdout_at_0.30" in payload
+    assert payload["topk_holdout_summary"] is not None
+    assert payload["threshold_policy"]["capacity_fallback"]["topk_fraction"] == pytest.approx(0.20)
 
 
 def test_train_baseline_enforces_train_pair_before_deps(

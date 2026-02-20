@@ -98,6 +98,32 @@ def summarize_proba(y_proba: pd.Series | np.ndarray) -> dict[str, float]:
     }
 
 
+def compute_confusion_counts_at_threshold(
+    y_true: pd.Series | np.ndarray,
+    y_proba: pd.Series | np.ndarray,
+    threshold: float = 0.5,
+) -> dict[str, int]:
+    """Return confusion counts (tn/fp/fn/tp) at a fixed threshold."""
+    y = pd.Series(y_true).astype("Int64").to_numpy()
+    scores = np.asarray(y_proba, dtype=float)
+    if len(y) != len(scores):
+        raise ValueError("y_true and y_proba must have same length.")
+    if len(y) == 0:
+        return {"tn": 0, "fp": 0, "fn": 0, "tp": 0}
+
+    unique_values = set(pd.Series(y).dropna().astype(int).unique().tolist())
+    if not unique_values.issubset({0, 1}):
+        raise ValueError(f"y_true must be binary (0/1). Got values: {sorted(unique_values)}")
+
+    y_int = y.astype(int)
+    y_pred = (scores >= float(threshold)).astype(int)
+    tn = int(np.sum((y_int == 0) & (y_pred == 0)))
+    fp = int(np.sum((y_int == 0) & (y_pred == 1)))
+    fn = int(np.sum((y_int == 1) & (y_pred == 0)))
+    tp = int(np.sum((y_int == 1) & (y_pred == 1)))
+    return {"tn": tn, "fp": fp, "fn": fn, "tp": tp}
+
+
 def compute_classification_metrics_at_threshold(
     y_true: pd.Series | np.ndarray,
     y_proba: pd.Series | np.ndarray,
@@ -127,6 +153,7 @@ def compute_classification_metrics_at_threshold(
             "n": 0,
             "n_pos": 0,
             "prevalence": 0.0,
+            "confusion_matrix": {"tn": 0, "fp": 0, "fn": 0, "tp": 0},
             "notes": notes,
         }
 
@@ -145,6 +172,12 @@ def compute_classification_metrics_at_threshold(
         pr_auc = None
         notes.append("single_class_target")
 
+    confusion_matrix = compute_confusion_counts_at_threshold(
+        y.astype(int),
+        scores,
+        threshold=threshold,
+    )
+
     return {
         "threshold": float(threshold),
         "recall": float(recall),
@@ -156,6 +189,7 @@ def compute_classification_metrics_at_threshold(
         "n": int(prevalence_info["n"]),
         "n_pos": int(prevalence_info["n_pos"]),
         "prevalence": float(prevalence_info["prevalence"]),
+        "confusion_matrix": confusion_matrix,
         "notes": notes,
     }
 
@@ -272,13 +306,17 @@ def select_threshold_for_target_recall(
 
 def build_default_prediction_policy(
     *,
-    k_frac: float = 0.10,
-    threshold: float = 0.50,
+    kind: str = "threshold",
+    k_frac: float = 0.20,
+    threshold: float = 0.30,
     score_name: str = "risk_proba",
 ) -> dict[str, Any]:
     """Return default decision policy config saved with model metadata."""
+    resolved_kind = str(kind).strip().lower()
+    if resolved_kind not in {"threshold", "top_k"}:
+        raise ValueError("kind must be one of: threshold, top_k.")
     return {
-        "kind": "top_k",
+        "kind": resolved_kind,
         "k_frac": float(k_frac),
         "threshold": float(threshold),
         "score_name": str(score_name),

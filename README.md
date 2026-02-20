@@ -562,15 +562,23 @@ Referências:
   - holdout `2023->2024`: `n=765`, `n_pos=308`, prevalência `0.4026`
 - Decisão operacional padrão:
   - `class_weight=none` como default de treino
-  - política de decisão padrão: `top_k` com `k_frac=0.10` (alternativa documentada: `0.20`)
-  - `threshold=0.50` mantido como alternativa para comparabilidade
+  - política principal: `threshold` fixo, com alerta se `risk_proba >= 0.30`
+  - política contingencial para restrição de capacidade: `top_k` com `k_frac=0.20`
+  - recall alvo no treino para seleção de threshold: `>= 0.90` (evitar tuning por predição in-sample)
+  - `threshold_calibration` (train-only) é evidência técnica e não substitui o `threshold` operacional fixo
 - Justificativa:
   - no cenário atual, `class_weight="balanced"` piorou Recall no holdout em relação a `class_weight=none`.
-  - otimização de threshold no treino não generalizou melhor no holdout.
-  - como a intervenção é limitada por capacidade, ranking `top-k` é mais acionável que um threshold fixo.
+  - para foco em Recall, threshold fixo performou melhor que `top-k` no holdout atual.
+  - evidência no `nonlinear_hgb/tuned` (`2023->2024`): `threshold=0.30` -> Recall `0.8117`, Precision `0.4545`, `positive_rate=0.7190`.
+  - evidência no `nonlinear_hgb/tuned` (`2023->2024`): `top_k=20%` -> Recall `0.4091`, Precision `0.8235`, `positive_rate=0.2000`.
+  - como a prevalência cai de `0.61` (treino) para `0.40` (holdout), recalibração periódica do threshold é obrigatória.
 - Implementação:
   - utilitários agregados em `src/metrics.py` (`threshold` e `top-k`), sem persistir scores/IDs.
+  - `src/thresholding.py` centraliza avaliação por threshold e seleção calibrada por Recall no treino.
   - `metadata.json` dos modelos inclui:
+    - `threshold_policy` (operação fixa `0.30` + fallback `top-k=20%`)
+    - `threshold_calibration` (calibração no treino com `Recall>=0.90`, sem substituir política operacional)
+    - `evaluation_train_at_0.5` / `evaluation_train_at_0.30` e equivalentes no holdout (agregado, sem IDs)
     - `class_imbalance_strategy` (prevalência, decisão, alternativas e evidências agregadas)
     - `prediction_policy` (config padrão consumível pela camada de serviço da API)
 
@@ -596,11 +604,11 @@ Referências:
 ## Métricas Oficiais (Fase 5)
 
 - O cálculo oficial de métricas está centralizado em `src/metrics.py`, evitando lógica duplicada entre CLIs.
-- Nesta fase, o threshold padrão é `0.5` (ajuste operacional de threshold é tarefa separada).
+- Nesta fase, o threshold operacional padrão para foco em Recall é `0.30`.
 - Cada `metadata.json` salva:
   - `evaluation_train` (pair `2022->2023`)
   - `evaluation_holdout` (pair `2023->2024`, quando `--eval-holdout 1`)
-  - bloco de métricas com `Recall`, `Precision`, `F1`, `ROC-AUC`, `PR-AUC` e `positive_rate`.
+  - bloco de métricas com `Recall`, `Precision`, `F1`, `ROC-AUC`, `PR-AUC`, `positive_rate` e `confusion_matrix_at_0.5` (`tn/fp/fn/tp`).
 
 ## Checklist do Projeto - Datathon Machine Learning Engineering
 
@@ -609,9 +617,9 @@ Este checklist foi elaborado considerando explicitamente as inconsistências rea
 Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 
 Progresso geral (barra visual):
-`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
+`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`68 de 110 tarefas concluídas (61.8%)`
+`70 de 110 tarefas concluídas (63.6%)`
 
 | Fase | Progresso |
 |---|---|
@@ -619,11 +627,11 @@ Progresso geral (barra visual):
 | Fase 2 - Organização do Projeto e Ambiente | 7/7 |
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 14/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 10/10 |
-| Fase 5 - Pipeline, Treinamento e Avaliação | 12/17 |
+| Fase 5 - Pipeline, Treinamento e Avaliação | 14/17 |
 | Fase 6 - Artefatos, API e Deploy | 0/15 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 2/13 |
 | Fase 8 - Documentação e Entrega Final | 10/21 |
-| Total | 68/110 |
+| Total | 70/110 |
 
 ### Fase 1 - Entendimento do Problema e Target [13/13]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
@@ -684,7 +692,7 @@ Nota de coorte temporal:
 - [x] Garantir que nenhuma feature use informação futura
 - [x] Documentar as principais decisões de feature engineering
 
-### Fase 5 - Pipeline, Treinamento e Avaliação [12/17]
+### Fase 5 - Pipeline, Treinamento e Avaliação [14/17]
 Nota de shift temporal:
 > Antes do treinamento final, é realizada uma análise de shift temporal do target e das features, uma vez que a prevalência da classe positiva varia significativamente entre os períodos analisados (aprox. `61%` para `40%`).
 
@@ -700,8 +708,8 @@ Nota de shift temporal:
 - [x] Comparar modelos com foco em Recall e PR-AUC
 - [x] Avaliar desempenho no holdout temporal (`2023 -> 2024`)
 - [x] Calcular métricas: Recall, Precision, F1-score, ROC-AUC, PR-AUC
-- [ ] Gerar matriz de confusão
-- [ ] Definir threshold operacional focado em Recall
+- [x] Gerar matriz de confusão
+- [x] Definir threshold operacional focado em Recall
 - [ ] Definir critério objetivo formal de seleção do modelo final (ex.: maior Recall com PR-AUC acima de limiar mínimo)
 - [ ] Justificar escolha do modelo final
 - [ ] Incluir validação de shift temporal do target e das features antes do treinamento final

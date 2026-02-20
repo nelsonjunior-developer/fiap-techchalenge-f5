@@ -26,13 +26,13 @@ from src.preprocessing import (
 )
 from src.metrics import (
     build_default_prediction_policy,
-    compute_classification_metrics_at_threshold,
     compute_metrics_threshold,
     compute_metrics_topk,
     compute_prevalence,
     summarize_proba,
     select_threshold_for_target_recall,
 )
+from src.thresholding import evaluate_at_threshold, select_threshold_by_recall
 from src.train_pipeline import build_model_pipeline
 from src.training_policy import OFFICIAL_TRAIN_PAIR, enforce_official_train_pair
 from src.training_utils import build_raw_from_ids
@@ -42,6 +42,10 @@ _logger = get_logger(__name__)
 _ALLOWED_SCALERS = {"standard", "robust", "none"}
 _ALLOWED_VARIANTS = {"none", "balanced"}
 _FORBIDDEN_METADATA_KEYS = {"ids", "ra_list", "students", "rows"}
+_OPERATIONAL_THRESHOLD = 0.30
+_CAPACITY_TOPK_FRACTION = 0.20
+_CALIBRATION_RECALL_TARGET = 0.90
+_CALIBRATION_GRID_SIZE = 2001
 
 
 def _require_training_dependencies() -> dict[str, Any]:
@@ -121,10 +125,11 @@ def _build_evaluation_block(
     pair: str,
     y_true: pd.Series,
     scores: np.ndarray,
-    threshold: float = 0.5,
+    threshold: float,
+    threshold_label: str,
     extra_notes: list[str] | None = None,
 ) -> dict[str, Any]:
-    payload = compute_classification_metrics_at_threshold(
+    payload = evaluate_at_threshold(
         y_true,
         scores,
         threshold=threshold,
@@ -132,41 +137,39 @@ def _build_evaluation_block(
     notes = list(payload.get("notes", []))
     if extra_notes:
         notes.extend(extra_notes)
+    confusion_key = f"confusion_matrix_at_{threshold_label}"
     return {
         "pair": pair,
         "threshold": float(threshold),
         "n": int(payload["n"]),
         "n_pos": int(payload["n_pos"]),
         "prevalence": float(payload["prevalence"]),
-        "metrics": {
-            "recall": float(payload["recall"]),
-            "precision": float(payload["precision"]),
-            "f1": float(payload["f1"]),
-            "roc_auc": payload["roc_auc"],
-            "pr_auc": payload["pr_auc"],
-            "positive_rate": float(payload["positive_rate"]),
-        },
+        "metrics": dict(payload["metrics"]),
+        "confusion_matrix": dict(payload["confusion_matrix"]),
+        confusion_key: dict(payload["confusion_matrix"]),
         "pred_proba_summary": summarize_proba(scores),
         "notes": notes,
     }
 
 
-def _build_holdout_evaluation(
-    *,
-    y_holdout: pd.Series | None,
-    scores_holdout: np.ndarray | None,
-) -> dict[str, Any] | None:
-    if y_holdout is None or scores_holdout is None:
-        return None
-    return _build_evaluation_block(
-        pair="2023->2024",
-        y_true=y_holdout,
-        scores=scores_holdout,
-        threshold=0.5,
-        extra_notes=[
-            "holdout evaluation is read-only; model was not fitted on holdout data",
+def _build_threshold_policy() -> dict[str, Any]:
+    return {
+        "operational": {
+            "mode": "fixed",
+            "threshold": float(_OPERATIONAL_THRESHOLD),
+            "rule": "alert_if_proba>=0.30",
+        },
+        "capacity_fallback": {
+            "mode": "topk",
+            "topk_fraction": float(_CAPACITY_TOPK_FRACTION),
+            "rule": "alert_top_20_percent_by_score",
+        },
+        "notes": [
+            "Operational threshold is fixed (0.30).",
+            "Top-k is a batch/ranking policy used only when capacity cannot handle the fixed-threshold volume.",
+            "Holdout is evaluation-only and never used to choose thresholds.",
         ],
-    )
+    }
 
 
 def _build_metadata_payload(
@@ -183,18 +186,25 @@ def _build_metadata_payload(
     dataset_sha256: str | None,
     n_samples_train: int,
     y_prevalence: float,
-    evaluation_train: dict[str, Any],
+    evaluation_train_at_05: dict[str, Any],
+    evaluation_train_at_030: dict[str, Any],
+    threshold_calibration: dict[str, Any],
+    threshold_policy: dict[str, Any],
     sklearn_version: str,
     class_imbalance_strategy: dict[str, Any],
     prediction_policy: dict[str, Any],
-    evaluation_holdout: dict[str, Any] | None,
+    evaluation_holdout_at_05: dict[str, Any] | None,
+    evaluation_holdout_at_030: dict[str, Any] | None,
+    evaluation_holdout_at_threshold_selected: dict[str, Any] | None,
+    topk_holdout_summary: dict[str, Any] | None,
     cv_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     notes = [
-        "threshold tuning is a later task",
+        "operational default policy uses fixed threshold=0.30 for recall-focused mode",
+        "threshold_calibration is train-only evidence and does not replace operational threshold",
         "holdout evaluation is read-only (no fitting on 2023->2024)",
     ]
-    if evaluation_holdout is None:
+    if evaluation_holdout_at_05 is None:
         notes.append("holdout evaluation disabled by flag")
     payload = {
         "model_kind": "LogisticRegression",
@@ -209,15 +219,23 @@ def _build_metadata_payload(
         "dataset_sha256": dataset_sha256,
         "n_samples_train": n_samples_train,
         "y_prevalence": y_prevalence,
-        "train_pred_proba_summary": evaluation_train["pred_proba_summary"],
-        "metrics_train_at_0.5": evaluation_train["metrics"],
+        "train_pred_proba_summary": evaluation_train_at_05["pred_proba_summary"],
+        "metrics_train_at_0.5": evaluation_train_at_05["metrics"],
         "metrics_holdout_at_0.5": (
-            evaluation_holdout.get("metrics")
-            if isinstance(evaluation_holdout, dict)
+            evaluation_holdout_at_05.get("metrics")
+            if isinstance(evaluation_holdout_at_05, dict)
             else None
         ),
-        "evaluation_train": evaluation_train,
-        "evaluation_holdout": evaluation_holdout,
+        "evaluation_train": evaluation_train_at_05,
+        "evaluation_holdout": evaluation_holdout_at_05,
+        "evaluation_train_at_0.5": evaluation_train_at_05,
+        "evaluation_train_at_0.30": evaluation_train_at_030,
+        "evaluation_holdout_at_0.5": evaluation_holdout_at_05,
+        "evaluation_holdout_at_0.30": evaluation_holdout_at_030,
+        "evaluation_holdout_at_threshold_selected": evaluation_holdout_at_threshold_selected,
+        "threshold_policy": threshold_policy,
+        "threshold_calibration": threshold_calibration,
+        "topk_holdout_summary": topk_holdout_summary,
         "class_imbalance_strategy": class_imbalance_strategy,
         "prediction_policy": prediction_policy,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -269,12 +287,12 @@ def _build_class_imbalance_strategy(
         tuned_thr = select_threshold_for_target_recall(
             y_train,
             variant_scores_train["none"],
-            target_recall=0.85,
+            target_recall=_CALIBRATION_RECALL_TARGET,
         )
         tuned_threshold_info = {
             "source_variant": "none",
-            "selection_rule": "max precision subject to recall>=0.85 on train",
-            "target_recall": 0.85,
+            "selection_rule": "max precision subject to recall>=0.90 on train",
+            "target_recall": float(_CALIBRATION_RECALL_TARGET),
             "selected_threshold": float(tuned_thr),
             "train": compute_metrics_threshold(
                 y_train,
@@ -320,7 +338,7 @@ def _build_class_imbalance_strategy(
     notes = [
         "Class positive prevalence is higher in train than holdout; temporal drift is present.",
         "class_weight='balanced' is not default; keep class_weight='none' unless new evidence supports change.",
-        "Top-k is default operational policy for limited intervention capacity; threshold=0.5 kept for comparability.",
+        "Threshold fixo e o modo operacional default para foco em recall; top-k fica como contingencia por capacidade.",
     ]
     if hold_prev is None:
         notes.append("Holdout prevalence and holdout evidence are null because holdout evaluation was disabled.")
@@ -328,15 +346,15 @@ def _build_class_imbalance_strategy(
     return {
         "train_prevalence": train_prev["prevalence"],
         "holdout_prevalence": None if hold_prev is None else hold_prev["prevalence"],
-        "default": {"kind": "top_k", "k_frac": 0.10},
+        "default": {"kind": "threshold", "threshold": float(_OPERATIONAL_THRESHOLD)},
         "alternatives": [
-            {"kind": "top_k", "k_frac": 0.20},
+            {"kind": "top_k", "k_frac": float(_CAPACITY_TOPK_FRACTION)},
             {"kind": "threshold", "threshold": 0.50},
         ],
         "class_weight_tested": class_weight_tested,
         "decision": (
-            "Use class_weight=none by default; prefer top-k for operational actionability; "
-            "keep threshold=0.5 for comparability."
+            "Use class_weight=none by default; use fixed threshold=0.30 for recall-focused operation; "
+            "use top-k=20% when capacity is constrained."
         ),
         "evidence": evidence,
         "notes": notes,
@@ -451,7 +469,6 @@ def run_baseline_training(
     class_weight_by_variant: dict[str, str] = {}
     metadata_payload_by_variant: dict[str, dict[str, Any]] = {}
     metadata_path_by_variant: dict[str, Path] = {}
-    evaluation_holdout_by_variant: dict[str, dict[str, Any] | None] = {}
 
     for variant in variants_list:
         class_weight: str | None = None if variant == "none" else "balanced"
@@ -484,20 +501,97 @@ def run_baseline_training(
             variant_scores_train[variant] = scores
             variant_scores_holdout[variant] = holdout_scores
             class_weight_by_variant[variant] = "none" if class_weight is None else str(class_weight)
-            evaluation_holdout_by_variant[variant] = _build_holdout_evaluation(
-                y_holdout=y_holdout,
-                scores_holdout=holdout_scores,
-            )
-            evaluation_train = _build_evaluation_block(
+            evaluation_train_at_05 = _build_evaluation_block(
                 pair=f"{year_t}->{year_t1}",
                 y_true=y_train,
                 scores=scores,
                 threshold=0.5,
+                threshold_label="0.5",
                 extra_notes=[
                     "train-only metrics computed on the same data used for fit",
                 ],
             )
-            metrics_at_05 = evaluation_train["metrics"]
+            evaluation_train_at_030 = _build_evaluation_block(
+                pair=f"{year_t}->{year_t1}",
+                y_true=y_train,
+                scores=scores,
+                threshold=_OPERATIONAL_THRESHOLD,
+                threshold_label="0.30",
+                extra_notes=[
+                    "train-only metrics computed on the same data used for fit",
+                ],
+            )
+            threshold_calibration_raw = select_threshold_by_recall(
+                y_true=y_train,
+                y_proba=scores,
+                recall_target=_CALIBRATION_RECALL_TARGET,
+                grid_size=_CALIBRATION_GRID_SIZE,
+            )
+            threshold_selected = float(threshold_calibration_raw["threshold_selected"])
+            evaluation_train_at_threshold_selected = _build_evaluation_block(
+                pair=f"{year_t}->{year_t1}",
+                y_true=y_train,
+                scores=scores,
+                threshold=threshold_selected,
+                threshold_label="threshold_selected",
+                extra_notes=[
+                    "threshold selected on train to satisfy recall target",
+                ],
+            )
+            threshold_calibration = {
+                "mode": "fixed_calibrated_on_train",
+                "recall_target": float(_CALIBRATION_RECALL_TARGET),
+                "selection_rule": str(threshold_calibration_raw["selection_rule"]),
+                "threshold_selected": threshold_selected,
+                "grid_size": int(threshold_calibration_raw["grid_size"]),
+                "achieved_recall": float(threshold_calibration_raw["achieved_recall"]),
+                "achieved_precision": float(threshold_calibration_raw["achieved_precision"]),
+                "achieved_positive_rate": float(threshold_calibration_raw["achieved_positive_rate"]),
+                "confusion_matrix_at_selected": dict(
+                    threshold_calibration_raw["confusion_matrix_at_selected"]
+                ),
+                "notes": list(threshold_calibration_raw["notes"]),
+                "evaluation_train_at_threshold_selected": evaluation_train_at_threshold_selected,
+            }
+            evaluation_holdout_at_05: dict[str, Any] | None = None
+            evaluation_holdout_at_030: dict[str, Any] | None = None
+            evaluation_holdout_at_threshold_selected: dict[str, Any] | None = None
+            topk_holdout_summary: dict[str, Any] | None = None
+            if y_holdout is not None and holdout_scores is not None:
+                holdout_notes = [
+                    "holdout evaluation is read-only; model was not fitted on holdout data",
+                ]
+                evaluation_holdout_at_05 = _build_evaluation_block(
+                    pair="2023->2024",
+                    y_true=y_holdout,
+                    scores=holdout_scores,
+                    threshold=0.5,
+                    threshold_label="0.5",
+                    extra_notes=holdout_notes,
+                )
+                evaluation_holdout_at_030 = _build_evaluation_block(
+                    pair="2023->2024",
+                    y_true=y_holdout,
+                    scores=holdout_scores,
+                    threshold=_OPERATIONAL_THRESHOLD,
+                    threshold_label="0.30",
+                    extra_notes=holdout_notes,
+                )
+                evaluation_holdout_at_threshold_selected = _build_evaluation_block(
+                    pair="2023->2024",
+                    y_true=y_holdout,
+                    scores=holdout_scores,
+                    threshold=threshold_selected,
+                    threshold_label="threshold_selected",
+                    extra_notes=holdout_notes,
+                )
+                topk_holdout_summary = compute_metrics_topk(
+                    y_holdout,
+                    holdout_scores,
+                    k_frac=_CAPACITY_TOPK_FRACTION,
+                )
+
+            metrics_at_05 = evaluation_train_at_05["metrics"]
 
             variant_dir = base_output_dir / variant
             variant_dir.mkdir(parents=True, exist_ok=True)
@@ -519,7 +613,13 @@ def run_baseline_training(
                 "dataset_sha256": dataset_sha256,
                 "n_samples_train": int(len(y_train)),
                 "y_prevalence": float(np.mean(y_train.astype(int).to_numpy())),
-                "evaluation_train": evaluation_train,
+                "evaluation_train_at_05": evaluation_train_at_05,
+                "evaluation_train_at_030": evaluation_train_at_030,
+                "threshold_calibration": threshold_calibration,
+                "evaluation_holdout_at_05": evaluation_holdout_at_05,
+                "evaluation_holdout_at_030": evaluation_holdout_at_030,
+                "evaluation_holdout_at_threshold_selected": evaluation_holdout_at_threshold_selected,
+                "topk_holdout_summary": topk_holdout_summary,
                 "sklearn_version": str(deps["sklearn_version"]),
             }
 
@@ -562,9 +662,11 @@ def run_baseline_training(
         variant_scores_holdout=variant_scores_holdout,
         class_weight_by_variant=class_weight_by_variant,
     )
+    threshold_policy = _build_threshold_policy()
     prediction_policy = build_default_prediction_policy(
-        k_frac=0.10,
-        threshold=0.50,
+        kind="threshold",
+        k_frac=_CAPACITY_TOPK_FRACTION,
+        threshold=_OPERATIONAL_THRESHOLD,
         score_name="risk_proba",
     )
     cv_payload_by_variant: dict[str, dict[str, Any] | None] = {}
@@ -611,11 +713,19 @@ def run_baseline_training(
             dataset_sha256=base_payload["dataset_sha256"],
             n_samples_train=base_payload["n_samples_train"],
             y_prevalence=base_payload["y_prevalence"],
-            evaluation_train=base_payload["evaluation_train"],
+            evaluation_train_at_05=base_payload["evaluation_train_at_05"],
+            evaluation_train_at_030=base_payload["evaluation_train_at_030"],
+            threshold_calibration=base_payload["threshold_calibration"],
+            threshold_policy=threshold_policy,
             sklearn_version=base_payload["sklearn_version"],
             class_imbalance_strategy=strategy_block,
             prediction_policy=prediction_policy,
-            evaluation_holdout=evaluation_holdout_by_variant.get(variant),
+            evaluation_holdout_at_05=base_payload["evaluation_holdout_at_05"],
+            evaluation_holdout_at_030=base_payload["evaluation_holdout_at_030"],
+            evaluation_holdout_at_threshold_selected=base_payload[
+                "evaluation_holdout_at_threshold_selected"
+            ],
+            topk_holdout_summary=base_payload["topk_holdout_summary"],
             cv_result=cv_payload_by_variant.get(variant),
         )
         metadata_path = metadata_path_by_variant[variant]
