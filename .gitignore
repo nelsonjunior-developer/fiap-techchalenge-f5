@@ -38,6 +38,9 @@ logs/*
 # Artefatos de execução/modelo
 artifacts/*
 !artifacts/.gitkeep
+app/model/model.joblib
+app/model/metadata.json
+app/model/backups/
 
 # Build/distribuicao
 build/

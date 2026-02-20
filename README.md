@@ -647,6 +647,18 @@ Referências:
   - `artifacts/temporal_shift_report.json` (obrigatorio)
   - `artifacts/temporal_shift_report.md` (opcional)
 
+## Promoção do Modelo Campeão (Fase 6)
+
+- O treino já persiste pipelines por variante em `artifacts/models/<family>/<variant>/model.joblib`.
+- A promoção para serving copia deterministicamente o campeão selecionado para caminho fixo da API:
+  - `app/model/model.joblib`
+  - `app/model/metadata.json`
+- Comando oficial:
+  - `python -m src.promote_model --selection-path artifacts/model_selection.json --models-root artifacts/models --out-dir app/model --force 0 --backup 1`
+- Rastreabilidade e rollback local:
+  - `app/model/promoted_model.json` registra vencedor, source/dest, hashes `sha256` e timestamp;
+  - `app/model/backups/<timestamp>/` guarda snapshot do modelo anterior quando `--backup 1`.
+
 ## Checklist do Projeto - Datathon Machine Learning Engineering
 
 Este checklist foi elaborado considerando explicitamente as inconsistências reais do dataset fornecido (schemas distintos entre anos, colunas duplicadas, valores inválidos, mudanças semânticas de campos e interseção parcial de estudantes entre períodos). As etapas descritas adotam práticas de Data Engineering e MLOps para garantir robustez, reprodutibilidade e validade estatística do modelo em produção.
@@ -656,7 +668,7 @@ Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 Progresso geral (barra visual):
 `[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`73 de 110 tarefas concluídas (66.4%)`
+`74 de 110 tarefas concluídas (67.3%)`
 
 | Fase | Progresso |
 |---|---|
@@ -665,10 +677,10 @@ Progresso geral (barra visual):
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 14/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 10/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 17/17 |
-| Fase 6 - Artefatos, API e Deploy | 0/15 |
+| Fase 6 - Artefatos, API e Deploy | 1/15 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 2/13 |
 | Fase 8 - Documentação e Entrega Final | 10/21 |
-| Total | 73/110 |
+| Total | 74/110 |
 
 ### Fase 1 - Entendimento do Problema e Target [13/13]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
@@ -751,8 +763,8 @@ Nota de shift temporal:
 - [x] Justificar escolha do modelo final
 - [x] Incluir validação de shift temporal do target e das features antes do treinamento final
 
-### Fase 6 - Artefatos, API e Deploy [0/15]
-- [ ] Salvar pipeline completa em `model.joblib`
+### Fase 6 - Artefatos, API e Deploy [1/15]
+- [x] Salvar pipeline completa em `model.joblib`
 - [ ] Criar `metadata.json` com modelo, métricas, threshold, features esperadas, data do treino e versões das bibliotecas
 - [ ] Salvar dados de referência para monitoramento de drift
 - [ ] Versionar dataset de treino/validação (`hash/checksum` + versão usada no experimento)
