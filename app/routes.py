@@ -54,6 +54,9 @@ def version() -> dict[str, object]:
         "variant": context["identity"]["variant"],
         "threshold_operational": float(context["threshold"]),
         "metadata_loaded": bool(status.get("metadata_loaded", False)),
+        "model_loaded": bool(status.get("model_loaded", False)),
+        "model_joblib_exists": bool(status.get("model_joblib_exists", False)),
+        "model_notes": list(status.get("notes", [])),
         "notes": _dedupe_notes(notes),
     }
 
@@ -75,7 +78,8 @@ def predict(payload: PredictRequest = Body(...)) -> PredictResponse:
         )
 
     context = deps.get_prediction_context()
-    model, model_status = deps.get_model()
+    model_state = deps.get_model()
+    model = model_state.get("model")
 
     expected_raw_cols = list(context.get("expected_raw_cols", []))
     metadata_loaded = bool(context.get("metadata_loaded", False))
@@ -84,8 +88,11 @@ def predict(payload: PredictRequest = Body(...)) -> PredictResponse:
             status_code=503,
             detail={
                 "detail": "metadata not available",
-                "model_loaded": bool(model_status.get("model_loaded", False)),
+                "model_loaded": bool(model_state.get("model_loaded", False)),
                 "metadata_loaded": metadata_loaded,
+                "notes": _dedupe_notes(
+                    list(context.get("notes", [])) + list(model_state.get("notes", []))
+                ),
             },
         )
 
@@ -96,6 +103,7 @@ def predict(payload: PredictRequest = Body(...)) -> PredictResponse:
                 "detail": "model not available",
                 "model_loaded": False,
                 "metadata_loaded": metadata_loaded,
+                "notes": list(model_state.get("notes", [])),
             },
         )
 
@@ -112,7 +120,7 @@ def predict(payload: PredictRequest = Body(...)) -> PredictResponse:
             detail={
                 "detail": "Missing required columns",
                 "missing_columns": missing_columns,
-                "model_loaded": bool(model_status.get("model_loaded", False)),
+                "model_loaded": bool(model_state.get("model_loaded", False)),
                 "metadata_loaded": metadata_loaded,
             },
         )
@@ -142,7 +150,7 @@ def predict(payload: PredictRequest = Body(...)) -> PredictResponse:
     identity = dict(context.get("identity", {}))
     notes: list[str] = []
     notes.extend(list(context.get("notes", [])))
-    notes.extend(list(model_status.get("notes", [])))
+    notes.extend(list(model_state.get("notes", [])))
     deduped_notes = _dedupe_notes(notes)
 
     predictions: list[PredictionResult] = []

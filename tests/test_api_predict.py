@@ -53,13 +53,14 @@ def test_predict_returns_503_when_service_not_ready(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr("app.routes.deps.get_prediction_context", lambda: _ctx([]))
     monkeypatch.setattr(
         "app.routes.deps.get_model",
-        lambda: (None, {"model_loaded": False, "notes": ["model_joblib_not_found"]}),
+        lambda: {"model": None, "model_loaded": False, "notes": ["model_file_missing"]},
     )
     status, body = _post_json({"a": 1, "b": 2})
     assert status == 503
     payload = body["detail"]
     assert payload["metadata_loaded"] is False
     assert payload["model_loaded"] is False
+    assert "notes" in payload
 
 
 def test_predict_invalid_structural_payload_returns_400() -> None:
@@ -77,7 +78,7 @@ def test_predict_missing_required_columns_returns_400(
     monkeypatch.setattr("app.routes.deps.get_prediction_context", lambda: _ctx(["a", "b"]))
     monkeypatch.setattr(
         "app.routes.deps.get_model",
-        lambda: (DummyModel(), {"model_loaded": True, "notes": ["model_loaded"]}),
+        lambda: {"model": DummyModel(), "model_loaded": True, "notes": ["model_loaded_ok"]},
     )
     status, body = _post_json({"a": 1})
     assert status == 400
@@ -90,7 +91,7 @@ def test_predict_allows_non_suspicious_extras(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr("app.routes.deps.get_prediction_context", lambda: _ctx(["a", "b"]))
     monkeypatch.setattr(
         "app.routes.deps.get_model",
-        lambda: (DummyModel(), {"model_loaded": True, "notes": ["model_loaded"]}),
+        lambda: {"model": DummyModel(), "model_loaded": True, "notes": ["model_loaded_ok"]},
     )
     status, payload = _post_json({"a": 1, "b": 2, "extra": 123})
     assert status == 200
@@ -105,7 +106,7 @@ def test_predict_blocks_leakage_like_extra_columns(
     monkeypatch.setattr("app.routes.deps.get_prediction_context", lambda: _ctx(["a", "b"]))
     monkeypatch.setattr(
         "app.routes.deps.get_model",
-        lambda: (DummyModel(), {"model_loaded": True, "notes": ["model_loaded"]}),
+        lambda: {"model": DummyModel(), "model_loaded": True, "notes": ["model_loaded_ok"]},
     )
     status, body = _post_json({"a": 1, "b": 2, "target": 1})
     assert status == 400
@@ -116,7 +117,7 @@ def test_predict_supports_batch_and_envelope(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr("app.routes.deps.get_prediction_context", lambda: _ctx(["a", "b"]))
     monkeypatch.setattr(
         "app.routes.deps.get_model",
-        lambda: (DummyModel(), {"model_loaded": True, "notes": ["model_loaded"]}),
+        lambda: {"model": DummyModel(), "model_loaded": True, "notes": ["model_loaded_ok"]},
     )
     rows = [{"a": 1, "b": 2}, {"a": 3, "b": 4}]
 
@@ -133,7 +134,7 @@ def test_predict_batch_too_large_returns_400(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr("app.routes.deps.get_prediction_context", lambda: _ctx(["a", "b"]))
     monkeypatch.setattr(
         "app.routes.deps.get_model",
-        lambda: (DummyModel(), {"model_loaded": True, "notes": ["model_loaded"]}),
+        lambda: {"model": DummyModel(), "model_loaded": True, "notes": ["model_loaded_ok"]},
     )
     rows = [{"a": 1, "b": 2}] * 501
     status, body = _post_json(rows)

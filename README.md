@@ -749,18 +749,30 @@ Exemplo `GET /version` (sem metadata carregado):
   "variant": "unknown",
   "threshold_operational": 0.3,
   "metadata_loaded": false,
+  "model_loaded": false,
+  "model_joblib_exists": false,
+  "model_notes": [
+    "model_file_missing",
+    "metadata_json_not_found"
+  ],
   "notes": [
     "metadata_missing_or_invalid",
     "fallback_unknown_model_version",
     "fallback_unknown_model_family",
     "fallback_unknown_variant",
     "fallback_default_threshold",
-    "model_joblib_not_found",
-    "metadata_json_not_found",
-    "model_loading_stub_only"
+    "model_file_missing",
+    "metadata_json_not_found"
   ]
 }
 ```
+
+## Carregamento do Modelo (Serving) (Fase 6)
+
+- O artefato servido é `app/model/model.joblib` (promovido via `python -m src.promote_model`)
+- O carregamento é `lazy` + cache em `app/deps.py` (não recarrega a cada request)
+- `GET /version` expõe `model_loaded` e `model_joblib_exists` para diagnóstico rápido
+- `POST /predict` retorna `503` com `notes` quando o modelo não está disponível ou falha no load
 
 ## POST /predict (Fase 6)
 
@@ -840,9 +852,9 @@ Este checklist foi elaborado considerando explicitamente as inconsistências rea
 Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 
 Progresso geral (barra visual):
-`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
+`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`82 de 110 tarefas concluídas (74.5%)`
+`83 de 110 tarefas concluídas (75.5%)`
 
 | Fase | Progresso |
 |---|---|
@@ -851,10 +863,10 @@ Progresso geral (barra visual):
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 14/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 10/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 17/17 |
-| Fase 6 - Artefatos, API e Deploy | 9/15 |
+| Fase 6 - Artefatos, API e Deploy | 10/15 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 2/13 |
 | Fase 8 - Documentação e Entrega Final | 10/21 |
-| Total | 82/110 |
+| Total | 83/110 |
 
 Nota:
 - A `Fase 9` é opcional e fica fora da contagem oficial de progresso (`barra`, `X/Y` e `%`).
@@ -940,7 +952,7 @@ Nota de shift temporal:
 - [x] Justificar escolha do modelo final
 - [x] Incluir validação de shift temporal do target e das features antes do treinamento final
 
-### Fase 6 - Artefatos, API e Deploy [9/15]
+### Fase 6 - Artefatos, API e Deploy [10/15]
 - [x] Salvar pipeline completa em `model.joblib`
 - [x] Criar `metadata.json` com modelo, métricas, threshold, features esperadas, data do treino e versões das bibliotecas
 - [x] Salvar dados de referência para monitoramento de drift
@@ -950,7 +962,7 @@ Nota de shift temporal:
 - [x] Implementar endpoint `POST /predict`
 - [x] Implementar `GET /health` e `GET /version`
 - [x] Validar entradas com Pydantic
-- [ ] Garantir carregamento do modelo salvo
+- [x] Garantir carregamento do modelo salvo
 - [ ] Criar Dockerfile enxuto baseado em `python:slim`
 - [ ] Documentar comandos de build e run no README
 - [ ] Implementar versionamento de modelos local (ex.: `artifacts/models/<model_version>/` com `model.joblib` + `metadata.json`)
