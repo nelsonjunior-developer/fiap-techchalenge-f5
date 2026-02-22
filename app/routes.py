@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import logging
 import os
 from typing import Any
 
@@ -20,7 +21,7 @@ from app.request_schemas import PredictRequest
 from app.schemas import PredictResponse, PredictionResult
 from src.decision import decide_risk_class
 from src.online_metrics import append_online_event, summarize_online_batch
-from src.utils import get_logger
+from src.utils import get_logger, log_event
 
 router = APIRouter()
 MAX_BATCH_SIZE = 500
@@ -51,6 +52,37 @@ def _format_rate(value: Any) -> str:
         return f"{float(value):.4f}"
     except (TypeError, ValueError):
         return "na"
+
+
+def _compute_positive_rate(
+    risk_probas: list[float] | None,
+    threshold: float | None,
+) -> float | None:
+    if risk_probas is None or threshold is None:
+        return None
+    if not risk_probas:
+        return 0.0
+    threshold_value = float(threshold)
+    positives = sum(1 for score in risk_probas if float(score) >= threshold_value)
+    return float(positives / len(risk_probas))
+
+
+def _predict_summary_event_name(status_code: int, reason_code: str | None) -> str:
+    code = int(status_code)
+    reason = str(reason_code or "").lower()
+    if code == 200:
+        return "predict_ok"
+    if code == 400:
+        return "predict_validation_error"
+    if code == 422:
+        return "predict_validation_422"
+    if code == 503:
+        return "predict_service_unavailable"
+    if code >= 500:
+        return "predict_internal_error"
+    if reason:
+        return "predict_request_summary"
+    return "predict_request_summary"
 
 
 def _build_missing_stats_notes(missing_stats: dict[str, Any] | None) -> list[str]:
@@ -85,16 +117,19 @@ def _log_predict_request_summary(
     count_records: int,
     allow_partial_enabled: bool,
     missing_stats: dict[str, Any] | None,
+    reason_code: str | None,
+    threshold: float | None,
+    positive_rate_at_threshold: float | None,
+    model_version: str,
 ) -> None:
     stats = dict(missing_stats or {})
-    _logger.info(
-        (
-            "predict_request_summary | status_code=%s | count_records=%s "
-            "| allow_partial_enabled=%s | allow_partial_used=%s "
-            "| expected_cols_count=%s | present_cols_count=%s | missing_cols_count=%s "
-            "| missing_cols_rate=%s | missing_non_structural_cols_rate=%s "
-            "| missing_values_rate=%s | extra_cols_count=%s"
-        ),
+    message = (
+        "predict_request_summary | status_code=%s | count_records=%s "
+        "| allow_partial_enabled=%s | allow_partial_used=%s "
+        "| expected_cols_count=%s | present_cols_count=%s | missing_cols_count=%s "
+        "| missing_cols_rate=%s | missing_non_structural_cols_rate=%s "
+        "| missing_values_rate=%s | extra_cols_count=%s"
+    ) % (
         int(status_code),
         int(count_records),
         bool(allow_partial_enabled),
@@ -106,6 +141,38 @@ def _log_predict_request_summary(
         _format_rate(stats.get("missing_non_structural_cols_rate")),
         _format_rate(stats.get("missing_values_rate")),
         stats.get("extra_cols_count"),
+    )
+    if positive_rate_at_threshold is not None:
+        message = f"{message} | positive_rate_at_threshold={_format_rate(positive_rate_at_threshold)}"
+    if threshold is not None:
+        message = f"{message} | threshold={_format_rate(threshold)}"
+    if reason_code:
+        message = f"{message} | reason_code={reason_code}"
+
+    level = logging.INFO if int(status_code) < 500 else logging.WARNING
+    log_event(
+        _logger,
+        _predict_summary_event_name(status_code, reason_code),
+        level=level,
+        message=message,
+        model_version=model_version,
+        context={
+            "status_code": int(status_code),
+            "count_records": int(count_records),
+            "reason_code": None if not reason_code else str(reason_code),
+            "allow_partial_enabled": bool(allow_partial_enabled),
+            "allow_partial_used": bool(stats.get("allow_partial_used", False)),
+            "expected_cols_count": stats.get("expected_cols_count"),
+            "present_cols_count": stats.get("present_cols_count"),
+            "missing_cols_count": stats.get("missing_cols_count"),
+            "missing_cols_rate": stats.get("missing_cols_rate"),
+            "missing_non_structural_cols_rate": stats.get("missing_non_structural_cols_rate"),
+            "missing_values_rate": stats.get("missing_values_rate"),
+            "extra_cols_count": stats.get("extra_cols_count"),
+            "positive_rate_at_threshold": positive_rate_at_threshold,
+            "threshold": threshold,
+            "model_version": model_version,
+        },
     )
 
 
@@ -138,15 +205,26 @@ def _append_predict_online_metrics_event(
             path=os.getenv("ONLINE_METRICS_PATH", "logs/online_metrics.jsonl"),
         )
     except Exception as exc:  # pragma: no cover - defensive
-        _logger.warning(
-            "predict online metrics emit failed | status_code=%s | exc=%s",
-            int(status_code),
-            exc.__class__.__name__,
+        log_event(
+            _logger,
+            "online_metrics_emit_failed",
+            level=logging.WARNING,
+            message=(
+                "predict online metrics emit failed | status_code=%s | exc=%s"
+                % (int(status_code), exc.__class__.__name__)
+            ),
+            model_version=model_version,
+            context={
+                "status_code": int(status_code),
+                "reason_code": reason_code,
+                "exc_type": exc.__class__.__name__,
+            },
         )
 
 
 @router.get("/health")
 def health() -> dict[str, str]:
+    log_event(_logger, "health_check", context={"status_code": 200})
     return {"status": "ok"}
 
 
@@ -159,7 +237,7 @@ def version() -> dict[str, object]:
     notes.extend(context.get("notes", []))
     notes.extend(status.get("notes", []))
 
-    return {
+    payload = {
         "model_version": context["identity"]["model_version"],
         "model_family": context["identity"]["model_family"],
         "variant": context["identity"]["variant"],
@@ -170,6 +248,21 @@ def version() -> dict[str, object]:
         "model_notes": list(status.get("notes", [])),
         "notes": _dedupe_notes(notes),
     }
+    log_event(
+        _logger,
+        "version_info",
+        model_version=str(payload["model_version"]),
+        context={
+            "status_code": 200,
+            "model_version": payload["model_version"],
+            "model_family": payload["model_family"],
+            "variant": payload["variant"],
+            "threshold_operational": payload["threshold_operational"],
+            "metadata_loaded": payload["metadata_loaded"],
+            "model_loaded": payload["model_loaded"],
+        },
+    )
+    return payload
 
 
 @router.post("/predict", response_model=PredictResponse)
@@ -184,6 +277,7 @@ def predict(payload: PredictRequest = Body(...)) -> PredictResponse:
     model_family_for_online = "unknown"
     variant_for_online = "unknown"
     threshold_for_online: float | None = None
+    positive_rate_for_log: float | None = None
 
     try:
         try:
@@ -292,6 +386,7 @@ def predict(payload: PredictRequest = Body(...)) -> PredictResponse:
 
         threshold = float(context["threshold"])
         threshold_for_online = float(threshold)
+        positive_rate_for_log = _compute_positive_rate(risk_probas_for_online, threshold_for_online)
         identity = dict(context.get("identity", {}))
         model_version_for_online = str(identity.get("model_version", "unknown"))
         model_family_for_online = str(identity.get("model_family", "unknown"))
@@ -348,6 +443,10 @@ def predict(payload: PredictRequest = Body(...)) -> PredictResponse:
             count_records=count_records,
             allow_partial_enabled=allow_partial_enabled,
             missing_stats=missing_stats,
+            reason_code=reason_code_for_online,
+            threshold=threshold_for_online,
+            positive_rate_at_threshold=positive_rate_for_log,
+            model_version=model_version_for_online,
         )
         _append_predict_online_metrics_event(
             status_code=status_code_for_log,

@@ -1251,11 +1251,63 @@ Observação:
 - Este check não recalcula métricas; ele valida consistência mínima de qualidade a partir dos artefatos de seleção/metadata.
 - Um modo local de recálculo com dataset real pode ser adicionado depois, mas fica fora do escopo deste check CI-friendly.
 
+## Logging Estruturado (Fase 7)
+
+O projeto usa logging estruturado em JSON por padrão (1 linha por evento), com foco em observabilidade local/Docker e sem vazamento de PII.
+
+- Implementação central: `src.utils`
+  - `JsonFormatter`
+  - `setup_logging(...)`
+  - `log_event(...)`
+- Escopo:
+  - pipeline (`src/*`) e API (`app/*`) usam a mesma configuração base
+  - a API adiciona `request_id` via middleware e responde com header `X-Request-ID`
+
+Formato padrão:
+
+- `stdout` em JSON (bom para Docker e agregadores de logs)
+- campos típicos por evento:
+  - `ts`, `level`, `logger`, `msg`
+  - `event` (quando emitido via `log_event`)
+  - `context` (dict agregado/sanitizado)
+  - `request_id` (API, quando houver)
+  - `model_version` (quando aplicável)
+
+Configuração por ambiente:
+
+```bash
+# Padrão (JSON em stdout)
+export LOG_FORMAT=json
+
+# Formato humano (plain) opcional
+export LOG_FORMAT=plain
+
+# Nível de log
+export LOG_LEVEL=INFO
+
+# Persistência opcional em arquivo local
+export LOG_TO_FILE=1
+export LOG_FILE_PATH=logs/app.log
+```
+
+Privacidade / anti-PII:
+
+- `log_event(...)` aplica redaction de chaves sensíveis no `context` (ex.: `RA`, `Nome_Anon`, `Avaliador*`, `payload`, `records`)
+- chaves removidas aparecem em `context.redacted_keys`
+- não logar payload completo, IDs de alunos ou scores individuais
+- logs da API usam métricas agregadas (rates/counts/histogramas) e eventos de erro sem body
+
+Observações:
+
+- A configuração é idempotente (não duplica handlers do projeto em chamadas repetidas de `setup_logging`)
+- O projeto mantém handlers no `root logger` (com `propagate=True` nos loggers filhos) para compatibilidade com `pytest caplog`
+
 ## CI (GitHub Actions) (Fase 7)
 
 - Workflow em `.github/workflows/ci.yml`
 - Executa em `push` e `pull_request` (`main`/`master`) com:
   - `pytest` + coverage (`--cov-fail-under=80`)
+  - `python -m src.regression_check` (CI-friendly: `SKIPPED`/exit `0` se não houver artefatos)
   - `python -m src.validate --no-markdown --skip-dataset`
   - `python -m src.cohort_stats --no-markdown --skip-dataset`
 - O modo `--skip-dataset` existe para CI porque `dataset/` não é versionado e não estará disponível no runner do GitHub Actions.
@@ -1272,7 +1324,7 @@ Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 Progresso geral (barra visual):
 `[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜]`
 
-`99 de 113 tarefas concluídas (87.6%)`
+`100 de 113 tarefas concluídas (88.5%)`
 
 | Fase | Progresso |
 |---|---|
@@ -1282,9 +1334,9 @@ Progresso geral (barra visual):
 | Fase 4 - Pré-processamento e Engenharia de Features | 10/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 17/17 |
 | Fase 6 - Artefatos, API e Deploy | 16/16 |
-| Fase 7 - Testes, Monitoramento e Dashboard | 9/13 |
+| Fase 7 - Testes, Monitoramento e Dashboard | 10/13 |
 | Fase 8 - Documentação e Entrega Final | 13/23 |
-| Total | 99/113 |
+| Total | 100/113 |
 
 Nota:
 - A `Fase 9` é opcional e fica fora da contagem oficial de progresso (`barra`, `X/Y` e `%`).
@@ -1388,7 +1440,7 @@ Nota de shift temporal:
 - [x] Definir estratégia de promoção de modelo (staging -> prod local) com critério objetivo (Recall/PR-AUC/threshold)
 - [x] Documentar procedimento de atualização do modelo na API (troca de versão e rollback local)
 
-### Fase 7 - Testes, Monitoramento e Dashboard [9/13]
+### Fase 7 - Testes, Monitoramento e Dashboard [10/13]
 - [x] Criar testes unitários e de integração com pytest
 - [x] Garantir cobertura mínima de 80% com `pytest-cov`
 - [x] Adicionar CI automatizada (rodar `pytest`, coverage, `python -m src.validate` e `python -m src.cohort_stats`)
@@ -1398,7 +1450,7 @@ Nota de shift temporal:
 - [x] Implementar rotina de avaliação pós-fato (quando labels `t+1` chegam) para medir Recall/PR-AUC em produção (mesmo que simulado) (`python -m src.offline_evaluation`)
 - [x] Definir política de retenção/limpeza de logs e artefatos locais (script simples + documentação) (`python -m src.retention`)
 - [x] Implementar teste de não-regressão do modelo com limiares mínimos de métricas (ex.: Recall e/ou PR-AUC) (`python -m src.regression_check` + `tests/test_model_regression.py`)
-- [ ] Configurar logging estruturado
+- [x] Configurar logging estruturado (JSON stdout por padrão, `log_event`, `request_id`, redaction anti-PII)
 - [ ] Aplicar política de privacidade operacional (não logar identificadores sensíveis como `RA` em API e monitoramento)
 - [ ] Implementar relatório de drift com Evidently
 - [ ] Criar aplicação Streamlit para visualização do relatório de drift

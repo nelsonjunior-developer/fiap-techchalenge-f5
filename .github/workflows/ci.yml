@@ -32,6 +32,10 @@ jobs:
         run: |
           pytest -q --cov=src --cov-report=term-missing --cov-fail-under=80
 
+      - name: Run model non-regression check (artifact-based, CI-friendly)
+        run: |
+          python -m src.regression_check --selection-path artifacts/model_selection.json --models-root artifacts/models
+
       - name: Validate data quality CLI (CI skip mode)
         run: |
           python -m src.validate --no-markdown --skip-dataset

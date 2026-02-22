@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import logging
 import os
 from typing import AsyncIterator
+from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
@@ -13,7 +15,12 @@ from fastapi.exceptions import RequestValidationError
 from app.deps import METADATA_PATH, get_prediction_context, get_serving_metadata
 from app.routes import router
 from src.online_metrics import append_online_event, summarize_online_batch
-from src.utils import get_logger
+from src.utils import (
+    get_logger,
+    log_event,
+    reset_request_id_context,
+    set_request_id_context,
+)
 
 _logger = get_logger(__name__)
 
@@ -29,11 +36,16 @@ def _env_flag_enabled(name: str, *, default: bool = False) -> bool:
 async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Initialize lightweight serving diagnostics without deprecated on_event hooks."""
     metadata, _ = get_serving_metadata()
-    _logger.info("API started")
-    _logger.info(
-        "metadata_loaded %s | basename=%s",
-        bool(metadata),
-        METADATA_PATH.name,
+    log_event(
+        _logger,
+        "api_started",
+        context={"component": "fastapi", "service": "pede-defasagem-api"},
+    )
+    log_event(
+        _logger,
+        "metadata_status",
+        message=f"metadata_loaded {bool(metadata)} | basename={METADATA_PATH.name}",
+        context={"metadata_loaded": bool(metadata), "basename": METADATA_PATH.name},
     )
     yield
 
@@ -43,6 +55,24 @@ app = FastAPI(
     version="0.1.0",
     lifespan=_lifespan,
 )
+
+
+@app.middleware("http")
+async def _request_id_middleware(request: Request, call_next):
+    request_id = uuid4().hex[:12]
+    request.state.request_id = request_id
+    token = set_request_id_context(request_id)
+    response = None
+    try:
+        response = await call_next(request)
+        try:
+            response.headers["X-Request-ID"] = request_id
+        except Exception:
+            # Keep request processing resilient even if a custom response object misbehaves.
+            pass
+        return response
+    finally:
+        reset_request_id_context(token)
 
 
 @app.exception_handler(RequestValidationError)
@@ -58,20 +88,32 @@ async def _request_validation_error_handler(
         if is_predict_route
         else None
     )
-    _logger.info(
-        (
+    allow_partial_label = (
+        str(bool(allow_partial_enabled)) if allow_partial_enabled is not None else "na"
+    )
+    log_event(
+        _logger,
+        "request_validation_422",
+        message=(
             "request_validation_summary | status_code=422 | method=%s | path=%s "
             "| error_count=%s | predict_route=%s | allow_partial_enabled=%s"
+        )
+        % (
+            request.method,
+            path,
+            int(error_count),
+            bool(is_predict_route),
+            allow_partial_label,
         ),
-        request.method,
-        path,
-        int(error_count),
-        bool(is_predict_route),
-        (
-            str(bool(allow_partial_enabled))
-            if allow_partial_enabled is not None
-            else "na"
-        ),
+        level=logging.INFO,
+        context={
+            "status_code": 422,
+            "method": request.method,
+            "path": path,
+            "error_count": int(error_count),
+            "predict_route": bool(is_predict_route),
+            "allow_partial_enabled": allow_partial_enabled,
+        },
     )
     if is_predict_route:
         try:
@@ -93,9 +135,19 @@ async def _request_validation_error_handler(
                 path=os.getenv("ONLINE_METRICS_PATH", "logs/online_metrics.jsonl"),
             )
         except Exception as inner_exc:  # pragma: no cover - defensive
-            _logger.warning(
-                "request_validation online metrics emit failed | exc=%s",
-                inner_exc.__class__.__name__,
+            log_event(
+                _logger,
+                "online_metrics_emit_failed",
+                level=logging.WARNING,
+                message=(
+                    "request_validation online metrics emit failed | exc=%s"
+                    % inner_exc.__class__.__name__
+                ),
+                context={
+                    "status_code": 422,
+                    "path": path,
+                    "exc_type": inner_exc.__class__.__name__,
+                },
             )
     return await request_validation_exception_handler(request, exc)
 
