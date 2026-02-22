@@ -14,13 +14,13 @@ import pandas as pd
 from src.data import get_default_dataset_path, load_pede_workbook_with_metadata, make_temporal_pairs
 from src.dataset_versioning import get_dataset_fingerprint, persist_dataset_version_event
 from src.metrics import compute_classification_metrics_at_threshold, summarize_proba
+from src.privacy import find_forbidden_json_keys
 from src.preprocessing import get_expected_raw_feature_columns
 from src.serving_context import extract_model_identity, extract_operational_threshold, load_serving_metadata
 from src.training_utils import build_raw_from_ids
 from src.utils import get_logger, setup_logging
 
 _logger = get_logger(__name__)
-_FORBIDDEN_KEYS = {"ra", "ra_list", "ids", "students", "student_ids", "records"}
 _PROMOTED_MISSING_MESSAGE = "Promoted serving model/metadata not found. Run src.promote_model first."
 
 
@@ -41,18 +41,6 @@ def _resolve_dataset_path(dataset_path: str | Path | None) -> Path:
     if not path.exists():
         raise FileNotFoundError(f"Dataset path not found: {path}")
     return path
-
-
-def _collect_keys(payload: Any) -> set[str]:
-    keys: set[str] = set()
-    if isinstance(payload, dict):
-        for key, value in payload.items():
-            keys.add(str(key).lower())
-            keys |= _collect_keys(value)
-    elif isinstance(payload, list):
-        for item in payload:
-            keys |= _collect_keys(item)
-    return keys
 
 
 def _extract_expected_raw_cols_from_model(model: Any) -> list[str]:
@@ -195,12 +183,12 @@ def run_offline_evaluation(
         "notes": sorted(set(str(note) for note in notes if str(note).strip())),
     }
 
-    forbidden_present = _FORBIDDEN_KEYS & _collect_keys(report)
+    forbidden_present = find_forbidden_json_keys(report)
     if forbidden_present:
         report["status"] = "FAIL"
         report.setdefault("errors", [])
         report["errors"].append(
-            f"Privacy check failed: forbidden keys found: {sorted(forbidden_present)}"
+            f"Privacy check failed: forbidden keys found: {forbidden_present}"
         )
 
     out_json_path = Path(out_json)
@@ -302,4 +290,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

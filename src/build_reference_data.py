@@ -19,12 +19,12 @@ from src.dataset_versioning import (
     persist_dataset_version_event,
 )
 from src.metadata_schema import validate_metadata
+from src.privacy import find_forbidden_json_keys
 from src.preprocessing import transform_raw_to_model_frame
 from src.training_utils import build_raw_from_ids
 from src.utils import get_logger, setup_logging
 
 _logger = get_logger(__name__)
-_FORBIDDEN_KEYS = {"ra", "ra_list", "ids", "student_ids", "students", "records"}
 _FORBIDDEN_COLS_EXACT = {"ra", "nome_anon"}
 _FORBIDDEN_COLS_PREFIX = ("avaliador",)
 _TOP_VALUES_LIMIT = 10
@@ -48,18 +48,6 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def _collect_keys(payload: Any) -> set[str]:
-    keys: set[str] = set()
-    if isinstance(payload, dict):
-        for key, value in payload.items():
-            keys.add(str(key).lower())
-            keys |= _collect_keys(value)
-    elif isinstance(payload, list):
-        for item in payload:
-            keys |= _collect_keys(item)
-    return keys
 
 
 def _parse_bool_flag(value: int) -> bool:
@@ -469,7 +457,7 @@ def run_build_reference_data(
     )
 
     for payload in (profile_payload, meta_payload):
-        forbidden = sorted(_FORBIDDEN_KEYS & _collect_keys(payload))
+        forbidden = find_forbidden_json_keys(payload)
         if forbidden:
             raise ValueError(f"Privacy check failed: forbidden keys found: {forbidden}")
 

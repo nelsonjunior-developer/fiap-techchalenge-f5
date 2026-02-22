@@ -20,6 +20,8 @@ from pathlib import Path
 import sys
 from typing import Any, Final, Mapping
 
+from src.privacy import safe_log_extra
+
 _DEFAULT_LOG_LEVEL: Final[str] = "INFO"
 _DEFAULT_LOG_FORMAT_MODE: Final[str] = "json"
 _DEFAULT_FILE_LOG_PATH: Final[str] = "logs/app.log"
@@ -28,7 +30,6 @@ _STDOUT_HANDLER_TAG: Final[str] = "project_stdout"
 _FILE_HANDLER_TAG: Final[str] = "project_file"
 _PROJECT_HANDLER_TAGS: Final[set[str]] = {_STDOUT_HANDLER_TAG, _FILE_HANDLER_TAG}
 _REQUEST_ID_VAR: ContextVar[str | None] = ContextVar("project_request_id", default=None)
-_SENSITIVE_LOG_KEYS_CACHE: set[str] | None = None
 
 
 def _resolve_log_level(level: str | int | None) -> tuple[int, str | None]:
@@ -119,80 +120,18 @@ def _sanitize_for_json(value: Any) -> Any:
     return str(value)
 
 
-def _load_sensitive_log_keys() -> set[str]:
-    global _SENSITIVE_LOG_KEYS_CACHE
-    if _SENSITIVE_LOG_KEYS_CACHE is not None:
-        return set(_SENSITIVE_LOG_KEYS_CACHE)
-
-    sensitive: set[str] = {
-        "ra",
-        "nome",
-        "nome_anon",
-        "records",
-        "record",
-        "payload",
-        "payload_raw",
-        "student_ids",
-        "students",
-        "ids",
-        "risk_probas",
-        "probas",
-        "scores",
-        "score_list",
-    }
-    try:
-        from src.contracts import PII_COLUMNS
-
-        sensitive |= {str(col).strip().lower() for col in PII_COLUMNS if str(col).strip()}
-    except Exception:
-        # Keep base fallback if contracts import is unavailable.
-        pass
-
-    _SENSITIVE_LOG_KEYS_CACHE = set(sensitive)
-    return set(_SENSITIVE_LOG_KEYS_CACHE)
-
-
-def _is_sensitive_log_key(key: str) -> bool:
-    normalized = str(key).strip().lower()
-    if not normalized:
-        return False
-    if normalized in _load_sensitive_log_keys():
-        return True
-    if normalized.startswith("avaliador"):
-        return True
-    return False
-
-
-def _sanitize_log_context(
-    value: Any,
-    *,
-    redacted_keys: list[str] | None = None,
-) -> Any:
-    if isinstance(value, Mapping):
-        sanitized: dict[str, Any] = {}
-        for raw_key, raw_value in value.items():
-            key = str(raw_key)
-            if _is_sensitive_log_key(key):
-                if redacted_keys is not None and key not in redacted_keys:
-                    redacted_keys.append(key)
-                continue
-            sanitized[key] = _sanitize_log_context(raw_value, redacted_keys=redacted_keys)
-        return sanitized
-    if isinstance(value, (list, tuple, set)):
-        return [_sanitize_log_context(item, redacted_keys=redacted_keys) for item in value]
-    return _sanitize_for_json(value)
-
-
 def sanitize_log_context(context: Mapping[str, Any] | None) -> tuple[dict[str, Any] | None, list[str]]:
     if context is None:
         return None, []
-    redacted_keys: list[str] = []
-    sanitized = _sanitize_log_context(dict(context), redacted_keys=redacted_keys)
+    sanitized = safe_log_extra(dict(context))
+    if sanitized is None:
+        return None, []
     if not isinstance(sanitized, dict):
         sanitized = {"value": _sanitize_for_json(sanitized)}
-    if redacted_keys:
-        sanitized["redacted_keys"] = sorted(dict.fromkeys(redacted_keys))
-    return sanitized, sorted(dict.fromkeys(redacted_keys))
+    redacted = sanitized.get("redacted_keys", [])
+    if not isinstance(redacted, list):
+        redacted = []
+    return sanitized, [str(item) for item in redacted]
 
 
 def set_request_id_context(request_id: str | None) -> object:
@@ -419,4 +358,3 @@ __all__ = [
     "set_request_id_context",
     "setup_logging",
 ]
-

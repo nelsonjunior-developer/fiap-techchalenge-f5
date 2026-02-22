@@ -8,11 +8,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from src.privacy import find_forbidden_json_keys
 from src.training_policy import OFFICIAL_HOLDOUT_PAIR
 from src.utils import get_logger, setup_logging
 
 _logger = get_logger(__name__)
-_FORBIDDEN_KEYS = {"ra", "ra_list", "ids", "student_ids", "students", "records"}
 
 
 def _safe_read_json(path: Path) -> dict[str, Any]:
@@ -333,18 +333,6 @@ def build_comparison_report(
     elif warnings:
         status = "WARNING"
 
-    # Privacy safety check for keys in output object.
-    def _collect_keys(obj: Any) -> set[str]:
-        keys: set[str] = set()
-        if isinstance(obj, dict):
-            for key, value in obj.items():
-                keys.add(str(key).lower())
-                keys |= _collect_keys(value)
-        elif isinstance(obj, list):
-            for item in obj:
-                keys |= _collect_keys(item)
-        return keys
-
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "models_root": str(models_root),
@@ -371,13 +359,12 @@ def build_comparison_report(
         "errors": errors,
         "warnings": warnings,
     }
-    keys_found = _collect_keys(report)
-    forbidden_present = _FORBIDDEN_KEYS & keys_found
+    forbidden_present = find_forbidden_json_keys(report)
     # rows/table are legitimate keys for report shape.
     if forbidden_present:
         report["status"] = "FAIL"
         report["errors"].append(
-            f"Privacy check failed: forbidden keys found in report: {sorted(forbidden_present)}"
+            f"Privacy check failed: forbidden keys found in report: {forbidden_present}"
         )
     return report
 

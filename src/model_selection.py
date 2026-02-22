@@ -8,10 +8,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from src.privacy import find_forbidden_json_keys
 from src.utils import get_logger, setup_logging
 
 _logger = get_logger(__name__)
-_FORBIDDEN_KEYS = {"ra", "ra_list", "ids", "student_ids", "students", "records"}
 _RANKING_ORDER = ["recall_desc", "pr_auc_desc", "positive_rate_asc", "name_lex"]
 _ALLOWED_MODEL_FAMILIES = {"baseline_logreg", "nonlinear_hgb"}
 
@@ -229,18 +229,6 @@ def extract_holdout_metrics(
     }
 
 
-def _collect_keys(payload: Any) -> set[str]:
-    keys: set[str] = set()
-    if isinstance(payload, dict):
-        for key, value in payload.items():
-            keys.add(str(key).lower())
-            keys |= _collect_keys(value)
-    elif isinstance(payload, list):
-        for item in payload:
-            keys |= _collect_keys(item)
-    return keys
-
-
 def select_best_model(
     candidates: list[dict[str, Any]],
     min_recall: float = 0.45,
@@ -412,12 +400,11 @@ def select_best_model(
         "errors": errors,
     }
 
-    keys_found = _collect_keys(report)
-    forbidden_present = _FORBIDDEN_KEYS & keys_found
+    forbidden_present = find_forbidden_json_keys(report)
     if forbidden_present:
         report["status"] = "FAIL"
         report["errors"].append(
-            f"Privacy check failed: forbidden keys found in report: {sorted(forbidden_present)}"
+            f"Privacy check failed: forbidden keys found in report: {forbidden_present}"
         )
     return report
 

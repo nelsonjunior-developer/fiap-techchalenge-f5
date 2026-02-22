@@ -10,8 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from src.dataset_versioning import compute_file_sha256
-
-_FORBIDDEN_KEYS = {"ra", "ra_list", "ids", "student_ids", "students", "records"}
+from src.privacy import find_forbidden_json_keys
 
 
 def compute_sha256(path: str | Path) -> str:
@@ -59,18 +58,6 @@ def _safe_read_json(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"Invalid JSON payload (expected object): {path}")
     return payload
-
-
-def _collect_keys(payload: Any) -> set[str]:
-    keys: set[str] = set()
-    if isinstance(payload, dict):
-        for key, value in payload.items():
-            keys.add(str(key).lower())
-            keys |= _collect_keys(value)
-    elif isinstance(payload, list):
-        for item in payload:
-            keys |= _collect_keys(item)
-    return keys
 
 
 def _safe_rel_path(path: Path) -> str:
@@ -232,7 +219,7 @@ def create_release(
             "Build artifacts remain under artifacts/models/<family>/<variant>/; releases are copies for rollback/rastreability.",
         ],
     }
-    forbidden = sorted(_FORBIDDEN_KEYS & _collect_keys(release_payload))
+    forbidden = find_forbidden_json_keys(release_payload)
     if forbidden:
         raise ValueError(f"Privacy check failed in release.json payload: {forbidden}")
 

@@ -1302,6 +1302,40 @@ Observações:
 - A configuração é idempotente (não duplica handlers do projeto em chamadas repetidas de `setup_logging`)
 - O projeto mantém handlers no `root logger` (com `propagate=True` nos loggers filhos) para compatibilidade com `pytest caplog`
 
+## Privacidade Operacional (Fase 7)
+
+Política operacional (logs, monitoramento e artefatos):
+
+- Nunca logar / persistir em monitoramento:
+  - `RA`
+  - `Nome_Anon` (pode conter nome real em bases antigas)
+  - `Avaliador1..Avaliador6`
+  - payloads completos (`payload`, `records`)
+  - listas de IDs/estudantes
+  - probabilidades individuais por aluno (`probas`, `risk_probas`, `scores`)
+- Permitido:
+  - contagens agregadas
+  - taxas (`missing_rate`, `positive_rate`)
+  - histogramas agregados (`bin_edges`, `bin_counts`)
+  - nomes de colunas (ex.: `missing_columns`, listas pequenas)
+
+Guardrails implementados:
+
+- `src/privacy.py`
+  - centraliza definição de campos/chaves sensíveis
+  - `redact_dict(...)` / `safe_log_extra(...)` para redaction em logs
+  - `is_safe_json_payload(...)` para validação heurística de payloads JSON de monitoramento/artefatos
+- `src.utils.log_event(...)`
+  - aplica redaction automaticamente no `context`
+  - adiciona `redacted_keys` quando remove campos sensíveis
+- `src/online_metrics.append_online_event(...)`
+  - valida privacidade do evento agregado antes de gravar em `logs/online_metrics.jsonl`
+  - em caso inseguro: faz `warning` e **não grava** o evento
+- API (`/predict`)
+  - não loga payload/records
+  - erro de extras leakage-like retorna mensagem genérica (sem listar campos sensíveis enviados)
+  - `422` de `/predict` retorna resposta sanitizada (sem ecoar `input` do Pydantic)
+
 ## CI (GitHub Actions) (Fase 7)
 
 - Workflow em `.github/workflows/ci.yml`
@@ -1322,9 +1356,9 @@ Este checklist foi elaborado considerando explicitamente as inconsistências rea
 Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 
 Progresso geral (barra visual):
-`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜]`
+`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜]`
 
-`100 de 113 tarefas concluídas (88.5%)`
+`101 de 113 tarefas concluídas (89.4%)`
 
 | Fase | Progresso |
 |---|---|
@@ -1334,9 +1368,9 @@ Progresso geral (barra visual):
 | Fase 4 - Pré-processamento e Engenharia de Features | 10/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 17/17 |
 | Fase 6 - Artefatos, API e Deploy | 16/16 |
-| Fase 7 - Testes, Monitoramento e Dashboard | 10/13 |
+| Fase 7 - Testes, Monitoramento e Dashboard | 11/13 |
 | Fase 8 - Documentação e Entrega Final | 13/23 |
-| Total | 100/113 |
+| Total | 101/113 |
 
 Nota:
 - A `Fase 9` é opcional e fica fora da contagem oficial de progresso (`barra`, `X/Y` e `%`).
@@ -1440,7 +1474,7 @@ Nota de shift temporal:
 - [x] Definir estratégia de promoção de modelo (staging -> prod local) com critério objetivo (Recall/PR-AUC/threshold)
 - [x] Documentar procedimento de atualização do modelo na API (troca de versão e rollback local)
 
-### Fase 7 - Testes, Monitoramento e Dashboard [10/13]
+### Fase 7 - Testes, Monitoramento e Dashboard [11/13]
 - [x] Criar testes unitários e de integração com pytest
 - [x] Garantir cobertura mínima de 80% com `pytest-cov`
 - [x] Adicionar CI automatizada (rodar `pytest`, coverage, `python -m src.validate` e `python -m src.cohort_stats`)
@@ -1451,7 +1485,7 @@ Nota de shift temporal:
 - [x] Definir política de retenção/limpeza de logs e artefatos locais (script simples + documentação) (`python -m src.retention`)
 - [x] Implementar teste de não-regressão do modelo com limiares mínimos de métricas (ex.: Recall e/ou PR-AUC) (`python -m src.regression_check` + `tests/test_model_regression.py`)
 - [x] Configurar logging estruturado (JSON stdout por padrão, `log_event`, `request_id`, redaction anti-PII)
-- [ ] Aplicar política de privacidade operacional (não logar identificadores sensíveis como `RA` em API e monitoramento)
+- [x] Aplicar política de privacidade operacional (não logar identificadores sensíveis como `RA` em API e monitoramento) (`src/privacy.py` + redaction no logger + `422` sanitizado no `/predict`)
 - [ ] Implementar relatório de drift com Evidently
 - [ ] Criar aplicação Streamlit para visualização do relatório de drift
 

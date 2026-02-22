@@ -21,13 +21,13 @@ from src.dataset_versioning import (
     persist_dataset_version_event,
 )
 from src.metrics import compute_metrics_threshold, compute_prevalence
+from src.privacy import find_forbidden_json_keys
 from src.preprocessing import get_expected_raw_feature_columns
 from src.training_policy import OFFICIAL_HOLDOUT_PAIR
 from src.training_utils import build_raw_from_ids
 from src.utils import get_logger, setup_logging
 
 _logger = get_logger(__name__)
-_FORBIDDEN_KEYS = {"ra", "ra_list", "ids", "students", "student_ids", "records"}
 
 
 def _require_eval_dependencies() -> dict[str, Any]:
@@ -91,18 +91,6 @@ def _extract_expected_raw_cols(model: Any) -> list[str]:
     if raw_cols:
         return [str(col).strip() for col in raw_cols if str(col).strip()]
     return get_expected_raw_feature_columns()
-
-
-def _collect_keys(payload: Any) -> set[str]:
-    keys: set[str] = set()
-    if isinstance(payload, dict):
-        for key, value in payload.items():
-            keys.add(str(key).lower())
-            keys |= _collect_keys(value)
-    elif isinstance(payload, list):
-        for item in payload:
-            keys |= _collect_keys(item)
-    return keys
 
 
 def run_holdout_evaluation(
@@ -204,12 +192,11 @@ def run_holdout_evaluation(
         "warnings": warnings,
     }
 
-    keys_found = _collect_keys(report)
-    forbidden_present = _FORBIDDEN_KEYS & keys_found
+    forbidden_present = find_forbidden_json_keys(report)
     if forbidden_present:
         report["status"] = "FAIL"
         report["errors"].append(
-            f"Privacy check failed: forbidden keys found: {sorted(forbidden_present)}"
+            f"Privacy check failed: forbidden keys found: {forbidden_present}"
         )
 
     output_json_path = Path(output_json)

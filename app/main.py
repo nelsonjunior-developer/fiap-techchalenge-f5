@@ -11,6 +11,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 from app.deps import METADATA_PATH, get_prediction_context, get_serving_metadata
 from app.routes import router
@@ -149,6 +150,15 @@ async def _request_validation_error_handler(
                     "exc_type": inner_exc.__class__.__name__,
                 },
             )
+    if is_predict_route:
+        # Do not echo Pydantic "input" values back to clients for /predict.
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": "Invalid request payload",
+                "error_count": int(error_count),
+            },
+        )
     return await request_validation_exception_handler(request, exc)
 
 

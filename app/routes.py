@@ -356,6 +356,10 @@ def predict(payload: PredictRequest = Body(...)) -> PredictResponse:
         except ValueError as exc:
             if "leakage-like extra columns" in str(exc):
                 reason_code_for_online = "leakage_like_extra_columns"
+                raise HTTPException(
+                    status_code=400,
+                    detail="leakage-like extra columns detected in payload",
+                ) from exc
             else:
                 reason_code_for_online = "payload_validation_error"
             raise HTTPException(status_code=400, detail=str(exc)) from exc

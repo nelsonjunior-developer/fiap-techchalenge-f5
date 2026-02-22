@@ -18,11 +18,11 @@ from src.config import RANDOM_STATE
 from src.dataset_versioning import safe_path_hint
 from src.features import get_engineered_feature_names
 from src.metadata_schema import validate_metadata
+from src.privacy import find_forbidden_json_keys
 from src.promotion_policy import promotion_decision
 from src.utils import get_logger, setup_logging
 
 _logger = get_logger(__name__)
-_FORBIDDEN_KEYS = {"ra", "ra_list", "ids", "student_ids", "students", "records"}
 
 
 def _safe_read_json(path: Path) -> dict[str, Any]:
@@ -45,18 +45,6 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def _collect_keys(payload: Any) -> set[str]:
-    keys: set[str] = set()
-    if isinstance(payload, dict):
-        for key, value in payload.items():
-            keys.add(str(key).lower())
-            keys |= _collect_keys(value)
-    elif isinstance(payload, list):
-        for item in payload:
-            keys |= _collect_keys(item)
-    return keys
 
 
 def _parse_bool_flag(value: int) -> bool:
@@ -790,8 +778,7 @@ def run_model_promotion(
         promoted_at=promoted_at,
     )
 
-    metadata_keys = _collect_keys(metadata_payload)
-    forbidden_metadata = sorted(_FORBIDDEN_KEYS & metadata_keys)
+    forbidden_metadata = find_forbidden_json_keys(metadata_payload)
     if forbidden_metadata:
         raise ValueError(
             f"Privacy check failed: forbidden keys found in metadata payload: {forbidden_metadata}"
@@ -864,8 +851,7 @@ def run_model_promotion(
         ],
     }
 
-    keys_found = _collect_keys(promoted_payload)
-    forbidden = sorted(_FORBIDDEN_KEYS & keys_found)
+    forbidden = find_forbidden_json_keys(promoted_payload)
     if forbidden:
         raise ValueError(
             f"Privacy check failed: forbidden keys found in promotion payload: {forbidden}"

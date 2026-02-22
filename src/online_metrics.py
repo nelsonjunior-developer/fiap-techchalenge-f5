@@ -9,6 +9,7 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+from src.privacy import is_safe_json_payload
 from src.utils import get_logger
 
 _logger = get_logger(__name__)
@@ -142,6 +143,12 @@ def append_online_event(event: dict, path: str = DEFAULT_ONLINE_METRICS_PATH) ->
     """Append one aggregated event as JSONL. Best-effort: never break the API on I/O failures."""
     output_path = Path(path)
     try:
+        if not is_safe_json_payload(event):
+            _logger.warning(
+                "online metrics append skipped (privacy check failed) | basename=%s",
+                output_path.name,
+            )
+            return
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(dict(event), ensure_ascii=False) + "\n")

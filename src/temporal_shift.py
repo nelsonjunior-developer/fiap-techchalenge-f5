@@ -17,6 +17,7 @@ from src.dataset_versioning import (
     get_dataset_fingerprint,
     persist_dataset_version_event,
 )
+from src.privacy import find_forbidden_json_keys
 from src.preprocessing import (
     build_pruning_plan_from_training_frame,
     get_expected_raw_feature_columns,
@@ -27,7 +28,6 @@ from src.training_utils import build_raw_from_ids
 from src.utils import get_logger, setup_logging
 
 _logger = get_logger(__name__)
-_FORBIDDEN_KEYS = {"ra", "ra_list", "ids", "student_ids", "students", "records"}
 _TOP_CATEGORIES_LIMIT = 5
 _CATEGORICAL_REFERENCE_TOP_K = 20
 
@@ -43,18 +43,6 @@ DEFAULT_SHIFT_THRESHOLDS: dict[str, float | int] = {
     "n_fail_features": 3,
     "n_warning_features": 5,
 }
-
-
-def _collect_keys(payload: Any) -> set[str]:
-    keys: set[str] = set()
-    if isinstance(payload, dict):
-        for key, value in payload.items():
-            keys.add(str(key).lower())
-            keys |= _collect_keys(value)
-    elif isinstance(payload, list):
-        for item in payload:
-            keys |= _collect_keys(item)
-    return keys
 
 
 def _safe_read_json(path: Path) -> dict[str, Any]:
@@ -660,8 +648,7 @@ def _build_shift_report(
         "errors": list(dict.fromkeys(errors)),
     }
 
-    keys_found = _collect_keys(report)
-    forbidden = sorted(_FORBIDDEN_KEYS & keys_found)
+    forbidden = find_forbidden_json_keys(report)
     if forbidden:
         report["status"] = "FAIL"
         report["errors"].append(

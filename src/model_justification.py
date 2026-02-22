@@ -9,10 +9,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from src.privacy import find_forbidden_json_keys
 from src.utils import get_logger, setup_logging
 
 _logger = get_logger(__name__)
-_FORBIDDEN_KEYS = {"ra", "ra_list", "ids", "student_ids", "students", "records"}
 
 
 def _to_float_or_none(value: Any) -> float | None:
@@ -33,18 +33,6 @@ def _threshold_label(value: float | None) -> str:
     if abs(threshold - 0.50) < 1e-9:
         return "0.5"
     return f"{threshold:.2f}"
-
-
-def _collect_keys(payload: Any) -> set[str]:
-    keys: set[str] = set()
-    if isinstance(payload, dict):
-        for key, value in payload.items():
-            keys.add(str(key).lower())
-            keys |= _collect_keys(value)
-    elif isinstance(payload, list):
-        for item in payload:
-            keys |= _collect_keys(item)
-    return keys
 
 
 def _winner_key_from_selection(selection: dict[str, Any]) -> tuple[str, str] | None:
@@ -353,8 +341,7 @@ def build_model_justification(selection: dict[str, Any]) -> dict[str, Any]:
         "errors": errors,
     }
 
-    keys_found = _collect_keys(justification)
-    forbidden = sorted(_FORBIDDEN_KEYS & keys_found)
+    forbidden = find_forbidden_json_keys(justification)
     if forbidden:
         justification["status"] = "FAIL"
         justification["notes"].append(
