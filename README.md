@@ -1153,6 +1153,62 @@ python -m src.offline_evaluation \
   - não logar `RA`, listas de IDs, payload raw, valores de célula ou probabilidades individuais
   - logs/artefatos de monitoramento devem conter apenas contagens, histogramas e taxas agregadas
 
+## Retenção e Limpeza Local (Fase 7)
+
+Para reduzir uso de disco e exposição desnecessária de artefatos locais, o projeto inclui uma rotina simples de retenção/limpeza baseada apenas em metadados de filesystem (path, `mtime`, tamanho), sem abrir conteúdo de arquivos.
+
+- CLI: `python -m src.retention`
+- comportamento padrão: `dry-run` (não deleta nada sem `--dry-run 0`)
+- segurança:
+  - não lê conteúdo dos arquivos
+  - ignora symlinks
+  - preserva `.gitkeep`
+
+Política padrão:
+
+- `logs/`
+  - `*.jsonl` e `*.log`: TTL de `14` dias
+- `artifacts/` (relatórios e saídas locais)
+  - `artifacts/*.json` e `artifacts/*.md`: TTL de `30` dias
+  - `artifacts/dataset_versions/*.json`: TTL de `30` dias
+  - `artifacts/models/**`: **não** é limpo automaticamente por padrão (risco alto)
+- `app/model/backups/`
+  - mantém `10` diretórios de backup mais recentes
+- `app/model/reference/backups/`
+  - mantém `5` diretórios de backup mais recentes
+- opcional (default OFF)
+  - `artifacts/models/releases/`: limpeza por contagem via `--keep-model-releases N` (usar com cautela)
+
+Comandos:
+
+```bash
+# Dry-run (padrão)
+python -m src.retention
+
+# Dry-run explícito
+python -m src.retention --dry-run 1
+
+# Executar limpeza de verdade
+python -m src.retention --dry-run 0
+
+# Customizar TTL/keep
+python -m src.retention --dry-run 0 \
+  --logs-ttl-days 7 \
+  --artifacts-ttl-days 21 \
+  --keep-model-backups 8 \
+  --keep-reference-backups 3
+
+# Opcional: limpar releases por contagem (default OFF)
+python -m src.retention --dry-run 1 --keep-model-releases 3
+```
+
+Observações:
+
+- A limpeza de `artifacts/models/**` fica desabilitada por padrão para evitar remoção acidental de artefatos de treino/releases.
+- O TTL de `logs/online_metrics.jsonl` é por **arquivo** (baseado em `mtime`), não por linha/evento:
+  - se o arquivo continuar recebendo append, o `mtime` fica recente e entradas antigas não serão removidas individualmente
+  - para retenção fina por evento, o próximo passo recomendado é rotação de arquivos (ex.: diário)
+
 ## CI (GitHub Actions) (Fase 7)
 
 - Workflow em `.github/workflows/ci.yml`
@@ -1172,9 +1228,9 @@ Este checklist foi elaborado considerando explicitamente as inconsistências rea
 Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 
 Progresso geral (barra visual):
-`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜]`
+`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜]`
 
-`97 de 113 tarefas concluídas (85.8%)`
+`98 de 113 tarefas concluídas (86.7%)`
 
 | Fase | Progresso |
 |---|---|
@@ -1184,9 +1240,9 @@ Progresso geral (barra visual):
 | Fase 4 - Pré-processamento e Engenharia de Features | 10/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 17/17 |
 | Fase 6 - Artefatos, API e Deploy | 16/16 |
-| Fase 7 - Testes, Monitoramento e Dashboard | 7/13 |
+| Fase 7 - Testes, Monitoramento e Dashboard | 8/13 |
 | Fase 8 - Documentação e Entrega Final | 13/23 |
-| Total | 97/113 |
+| Total | 98/113 |
 
 Nota:
 - A `Fase 9` é opcional e fica fora da contagem oficial de progresso (`barra`, `X/Y` e `%`).
@@ -1290,7 +1346,7 @@ Nota de shift temporal:
 - [x] Definir estratégia de promoção de modelo (staging -> prod local) com critério objetivo (Recall/PR-AUC/threshold)
 - [x] Documentar procedimento de atualização do modelo na API (troca de versão e rollback local)
 
-### Fase 7 - Testes, Monitoramento e Dashboard [7/13]
+### Fase 7 - Testes, Monitoramento e Dashboard [8/13]
 - [x] Criar testes unitários e de integração com pytest
 - [x] Garantir cobertura mínima de 80% com `pytest-cov`
 - [x] Adicionar CI automatizada (rodar `pytest`, coverage, `python -m src.validate` e `python -m src.cohort_stats`)
@@ -1298,7 +1354,7 @@ Nota de shift temporal:
 - [x] Definir estratégia de mensuração em produção com "ground truth delay" (métricas online vs métricas offline quando o rótulo chega)
 - [x] Implementar logging agregado de inferência (distribuição de scores, taxa de positivos por threshold, taxa de erro de validação) sem PII (`logs/online_metrics.jsonl` + eventos agregados `2xx/4xx/5xx/422`)
 - [x] Implementar rotina de avaliação pós-fato (quando labels `t+1` chegam) para medir Recall/PR-AUC em produção (mesmo que simulado) (`python -m src.offline_evaluation`)
-- [ ] Definir política de retenção/limpeza de logs e artefatos locais (script simples + documentação)
+- [x] Definir política de retenção/limpeza de logs e artefatos locais (script simples + documentação) (`python -m src.retention`)
 - [ ] Implementar teste de não-regressão do modelo com limiares mínimos de métricas (ex.: Recall e/ou PR-AUC)
 - [ ] Configurar logging estruturado
 - [ ] Aplicar política de privacidade operacional (não logar identificadores sensíveis como `RA` em API e monitoramento)
