@@ -139,6 +139,40 @@ def persist_ra_intersections(
     return json_path, md_path
 
 
+def persist_skip_dataset_report(
+    *,
+    output_dir: str | Path = "artifacts",
+    write_markdown: bool = False,
+) -> dict[str, Any]:
+    """Persist a minimal CI-friendly cohort report when dataset is unavailable."""
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    report: dict[str, Any] = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "status": "SKIPPED",
+        "reason": "dataset_not_available_in_ci",
+        "default_pairs": [[year_a, year_b] for year_a, year_b in DEFAULT_PAIRS],
+        "notes": ["ran_in_ci_skip_mode"],
+    }
+
+    json_path = output_path / "ra_intersections.json"
+    json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    if write_markdown:
+        md_path = output_path / "ra_intersections.md"
+        md_path.write_text(
+            "# Estatísticas de Interseção por RA\n\n"
+            "- Status: `SKIPPED`\n"
+            "- Reason: `dataset_not_available_in_ci`\n"
+            "- Notes: `ran_in_ci_skip_mode`\n",
+            encoding="utf-8",
+        )
+
+    _logger.warning("RA intersections skipped | reason=%s report=%s", report["reason"], json_path)
+    return report
+
+
 def run_from_loaded_data(
     output_dir: str | Path = "artifacts",
     write_markdown: bool = True,
@@ -179,12 +213,29 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Generate JSON only (skip markdown report).",
     )
+    parser.add_argument(
+        "--skip-dataset",
+        action="store_true",
+        help="Skip XLSX loading (CI mode). Writes minimal SKIPPED JSON report and exits 0.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = _parse_args()
     setup_logging()
+
+    if args.skip_dataset:
+        report = persist_skip_dataset_report(
+            output_dir=args.output_dir,
+            write_markdown=not args.no_markdown,
+        )
+        _logger.info(
+            "RA intersection CLI summary | status=%s reason=%s",
+            report["status"],
+            report["reason"],
+        )
+        return
 
     report = run_from_loaded_data(
         output_dir=args.output_dir,

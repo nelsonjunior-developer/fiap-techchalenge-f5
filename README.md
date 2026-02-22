@@ -731,6 +731,129 @@ Rollback local:
 - Observação operacional:
   - a promoção da API continua usando o campeão do `model_selection`; o release versionado facilita rollback e auditoria local.
 
+## Atualização do Modelo na API (Troca de Versão e Rollback) (Fase 6)
+
+Esta seção documenta o **procedimento operacional** para trocar a versão do modelo servido pela API e executar rollback local com segurança, reutilizando apenas os mecanismos já implementados no projeto.
+
+Pré-requisitos:
+- API FastAPI disponível (local ou em container).
+- Caminho de serving padrão:
+  - `app/model/model.joblib`
+  - `app/model/metadata.json`
+- O endpoint `GET /version` deve refletir `model_version`, `model_family`, `variant` e `threshold_operational`.
+
+Fluxo recomendado (staging -> prod):
+
+```bash
+# A) Treinar e avaliar candidatos (treino oficial 2022->2023, holdout 2023->2024)
+python -m src.train_baseline ...
+python -m src.train_hgb ...
+
+# B) Selecionar campeão com critério formal
+python -m src.model_selection \
+  --models-root artifacts/models \
+  --output-json artifacts/model_selection.json \
+  --output-md artifacts/model_selection.md
+
+# C) (Opcional) Criar release imutável para rastreabilidade/rollback
+python -m src.create_release \
+  --selection-path artifacts/model_selection.json \
+  --out-root artifacts/models/releases
+
+# D) Stage (não altera produção local)
+python -m src.promote_model \
+  --selection-path artifacts/model_selection.json \
+  --models-root artifacts/models \
+  --out-dir app/model/staging \
+  --stage-only 1 \
+  --backup 1 \
+  --force 0 \
+  --allow-warning 0
+```
+
+Se `artifacts/model_selection.json` estiver em `WARNING` (decision `ALLOW_WITH_OVERRIDE`), repetir com override explícito:
+
+```bash
+python -m src.promote_model \
+  --selection-path artifacts/model_selection.json \
+  --models-root artifacts/models \
+  --out-dir app/model/staging \
+  --stage-only 1 \
+  --backup 1 \
+  --force 0 \
+  --allow-warning 1
+```
+
+Validação antes de promover (staging):
+- Verificar manifesto: `app/model/staging/staging_manifest.json`
+- Validar contrato do metadata staged:
+  - `python -m src.metadata_schema --path app/model/staging/metadata.json`
+- Sanity check opcional do pipeline/dataset:
+  - `python -m src.smoke_pipeline`
+  - Observação: `src.smoke_pipeline` é um smoke check do pipeline/projeto; **não valida diretamente** o artefato em `app/model/staging/`.
+- Se a API estiver rodando em Docker com volume montado, validar endpoints:
+  - `curl http://localhost:8000/version`
+  - `curl http://localhost:8000/health`
+
+Promover staging -> prod local (troca efetiva):
+
+```bash
+python -m src.promote_model \
+  --selection-path artifacts/model_selection.json \
+  --from-staging app/model/staging \
+  --out-dir app/model \
+  --promote 1 \
+  --backup 1 \
+  --force 0 \
+  --allow-warning 0
+```
+
+Se o `selection.status` continuar em `WARNING`, pode ser necessário repetir com `--allow-warning 1` também no `promote`.
+
+Verificação pós-troca (obrigatória):
+1. Reiniciar a API/processo (ou reiniciar o container) após o `promote`.
+2. Consultar `GET /version`:
+   - `curl http://localhost:8000/version`
+   - validar `model_version`, `model_family`, `variant`, `threshold_operational`
+3. (Opcional) Testar `POST /predict` com payload válido mínimo:
+   - deve retornar `200` quando `model_loaded=true` e `metadata_loaded=true`
+
+Observação importante sobre reinício:
+- O serving usa cache em `app/deps.py` (`lru_cache`) para metadata/modelo/contexto.
+- Sem reiniciar o processo, a API pode continuar servindo a versão anterior mesmo após copiar novos arquivos para `app/model/`.
+
+Rollback local rápido (backup automático):
+- Backups ficam em `app/model/backups/<timestamp>/`
+- Cada snapshot inclui `model.joblib` e `metadata.json` anteriores
+
+Procedimento:
+
+```bash
+# A) Inspecionar backups disponíveis
+ls -1 app/model/backups
+
+# B) Restaurar arquivos do backup escolhido
+cp app/model/backups/<timestamp>/model.joblib app/model/model.joblib
+cp app/model/backups/<timestamp>/metadata.json app/model/metadata.json
+
+# C) Reiniciar API/container (obrigatório por causa do cache)
+# D) Validar versão restaurada
+curl http://localhost:8000/version
+```
+
+Rollback alternativo (via release imutável):
+- Se existir release em `artifacts/models/releases/<model_version>/`, é possível restaurar manualmente:
+  - copiar `model.joblib` e `metadata.json` da release para `app/model/`
+  - reiniciar API/container
+  - validar em `GET /version`
+
+Notas operacionais:
+- `--allow-warning` (governança) **não é** `--force` (sobrescrita de arquivos).
+- `--force 1` apenas permite sobrescrever destino existente; mantenha `--backup 1` para preservar rollback local.
+- `src.promote_model --promote 1` usa `--selection-path` (default: `artifacts/model_selection.json`) para reavaliar policy; se seu arquivo estiver em outro local, informe o path explicitamente.
+- Não versionar `app/model/model.joblib` nem `app/model/metadata.json` no git; versione apenas documentação/manifests quando fizer sentido.
+- Manifestos (`staging_manifest.json`, `promoted_model.json`, `release.json`) devem permanecer sem `RA`/IDs/PII.
+
 ## Metadata do Modelo (Serving) (Fase 6)
 
 - O `metadata.json` de serving (`app/model/metadata.json`) segue schema mínimo validável para operação da API e monitoramento:
@@ -951,6 +1074,18 @@ Exemplo de resposta:
 }
 ```
 
+## CI (GitHub Actions) (Fase 7)
+
+- Workflow em `.github/workflows/ci.yml`
+- Executa em `push` e `pull_request` (`main`/`master`) com:
+  - `pytest` + coverage (`--cov-fail-under=80`)
+  - `python -m src.validate --no-markdown --skip-dataset`
+  - `python -m src.cohort_stats --no-markdown --skip-dataset`
+- O modo `--skip-dataset` existe para CI porque `dataset/` não é versionado e não estará disponível no runner do GitHub Actions.
+- Localmente (com dataset real), rode sem `--skip-dataset` para validação completa:
+  - `python -m src.validate`
+  - `python -m src.cohort_stats`
+
 ## Checklist do Projeto - Datathon Machine Learning Engineering
 
 Este checklist foi elaborado considerando explicitamente as inconsistências reais do dataset fornecido (schemas distintos entre anos, colunas duplicadas, valores inválidos, mudanças semânticas de campos e interseção parcial de estudantes entre períodos). As etapas descritas adotam práticas de Data Engineering e MLOps para garantir robustez, reprodutibilidade e validade estatística do modelo em produção.
@@ -958,9 +1093,9 @@ Este checklist foi elaborado considerando explicitamente as inconsistências rea
 Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 
 Progresso geral (barra visual):
-`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
+`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`88 de 111 tarefas concluídas (79.3%)`
+`90 de 111 tarefas concluídas (81.1%)`
 
 | Fase | Progresso |
 |---|---|
@@ -969,10 +1104,10 @@ Progresso geral (barra visual):
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 14/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 10/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 17/17 |
-| Fase 6 - Artefatos, API e Deploy | 15/16 |
-| Fase 7 - Testes, Monitoramento e Dashboard | 2/13 |
+| Fase 6 - Artefatos, API e Deploy | 16/16 |
+| Fase 7 - Testes, Monitoramento e Dashboard | 3/13 |
 | Fase 8 - Documentação e Entrega Final | 10/21 |
-| Total | 88/111 |
+| Total | 90/111 |
 
 Nota:
 - A `Fase 9` é opcional e fica fora da contagem oficial de progresso (`barra`, `X/Y` e `%`).
@@ -1058,7 +1193,7 @@ Nota de shift temporal:
 - [x] Justificar escolha do modelo final
 - [x] Incluir validação de shift temporal do target e das features antes do treinamento final
 
-### Fase 6 - Artefatos, API e Deploy [15/16]
+### Fase 6 - Artefatos, API e Deploy [16/16]
 - [x] Salvar pipeline completa em `model.joblib`
 - [x] Criar `metadata.json` com modelo, métricas, threshold, features esperadas, data do treino e versões das bibliotecas
 - [x] Salvar dados de referência para monitoramento de drift
@@ -1074,12 +1209,12 @@ Nota de shift temporal:
 - [x] Documentar comandos de build e run no README
 - [x] Implementar versionamento de modelos local (ex.: `artifacts/models/releases/<model_version>/` com `model.joblib` + `metadata.json`)
 - [x] Definir estratégia de promoção de modelo (staging -> prod local) com critério objetivo (Recall/PR-AUC/threshold)
-- [ ] Documentar procedimento de atualização do modelo na API (troca de versão e rollback local)
+- [x] Documentar procedimento de atualização do modelo na API (troca de versão e rollback local)
 
-### Fase 7 - Testes, Monitoramento e Dashboard [2/13]
+### Fase 7 - Testes, Monitoramento e Dashboard [3/13]
 - [x] Criar testes unitários e de integração com pytest
 - [x] Garantir cobertura mínima de 80% com `pytest-cov`
-- [ ] Adicionar CI automatizada (rodar `pytest`, coverage, `python -m src.validate` e `python -m src.cohort_stats`)
+- [x] Adicionar CI automatizada (rodar `pytest`, coverage, `python -m src.validate` e `python -m src.cohort_stats`)
 - [ ] Definir comportamento para alunos novos (sem histórico): validação de contrato, imputação/valores default e logging da taxa de campos ausentes
 - [ ] Definir estratégia de mensuração em produção com "ground truth delay" (métricas online vs métricas offline quando o rótulo chega)
 - [ ] Implementar logging agregado de inferência (distribuição de scores, taxa de positivos por threshold, taxa de erro de validação) sem PII
