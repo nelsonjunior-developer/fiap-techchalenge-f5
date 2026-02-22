@@ -1095,7 +1095,7 @@ Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 Progresso geral (barra visual):
 `[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`90 de 111 tarefas concluídas (81.1%)`
+`92 de 113 tarefas concluídas (81.4%)`
 
 | Fase | Progresso |
 |---|---|
@@ -1106,8 +1106,8 @@ Progresso geral (barra visual):
 | Fase 5 - Pipeline, Treinamento e Avaliação | 17/17 |
 | Fase 6 - Artefatos, API e Deploy | 16/16 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 3/13 |
-| Fase 8 - Documentação e Entrega Final | 10/21 |
-| Total | 90/111 |
+| Fase 8 - Documentação e Entrega Final | 12/23 |
+| Total | 92/113 |
 
 Nota:
 - A `Fase 9` é opcional e fica fora da contagem oficial de progresso (`barra`, `X/Y` e `%`).
@@ -1226,7 +1226,7 @@ Nota de shift temporal:
 - [ ] Implementar relatório de drift com Evidently
 - [ ] Criar aplicação Streamlit para visualização do relatório de drift
 
-### Fase 8 - Documentação e Entrega Final [10/21]
+### Fase 8 - Documentação e Entrega Final [12/23]
 - [x] Documentar visão geral do problema e objetivo
 - [ ] Documentar stack tecnológica
 - [ ] Adicionar versionamento/changelog dos contratos (`docs/contracts`)
@@ -1238,7 +1238,9 @@ Nota de shift temporal:
 - [ ] Documentar limitações conhecidas do modelo e riscos assumidos
 - [ ] Documentar exemplos de chamadas à API
 - [x] Documentar setup de ambiente local com `.venv` e instalação de dependências
-- [ ] Publicar código organizado no GitHub
+- [x] Publicar código organizado no GitHub (PR `#1` aberta via GitHub CLI)
+- [x] Mesclar PR na `main` via GitHub CLI (PR `#1` mesclada)
+- [ ] [DOING] Commitar checklist, abrir PR de atualização, mesclar na `main` e limpar branch local
 - [ ] Disponibilizar API acessível localmente
 - [ ] Gravar vídeo gerencial (<= 5 minutos) explicando a solução
 - [x] Criar `agents.md` com convenções operacionais para agentes LLM
