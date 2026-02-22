@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -85,3 +86,36 @@ def test_version_endpoint_reads_metadata_when_available(tmp_path: Path) -> None:
     assert payload["model_family"] == "nonlinear_hgb"
     assert payload["variant"] == "default"
     assert payload["threshold_operational"] == pytest.approx(0.42)
+
+
+def test_global_request_validation_422_is_logged_without_payload_values(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+) -> None:
+    if TestClient is None:
+        pytest.skip("TestClient unavailable in this environment")
+
+    marker = "PII-MARKER-123"
+    monkeypatch.setenv("ALLOW_PARTIAL_PAYLOAD", "1")
+    online_metrics_path = tmp_path / "logs" / "online_metrics.jsonl"
+    monkeypatch.setenv("ONLINE_METRICS_PATH", str(online_metrics_path))
+
+    with caplog.at_level(logging.INFO):
+        with TestClient(app) as client:
+            response = client.post("/predict", json={"records": marker})
+
+    assert response.status_code == 422
+    assert "request_validation_summary" in caplog.text
+    assert "status_code=422" in caplog.text
+    assert "path=/predict" in caplog.text
+    assert "predict_route=True" in caplog.text
+    assert "allow_partial_enabled=True" in caplog.text
+    assert marker not in caplog.text
+    lines = online_metrics_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    event = json.loads(lines[0])
+    assert event["status_code"] == 422
+    assert event["status_family"] == "4xx"
+    assert event["reason_code"] == "request_validation_422"
+    assert event["score_histogram"] is None

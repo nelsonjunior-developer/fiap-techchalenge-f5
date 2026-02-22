@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 pytest.importorskip("fastapi")
@@ -128,6 +130,45 @@ def test_predict_supports_batch_and_envelope(monkeypatch: pytest.MonkeyPatch) ->
     assert body_batch["count"] == 2
     assert status_envelope == 200
     assert body_envelope["count"] == 2
+
+
+def test_predict_end_to_end_allows_partial_payload_with_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    if TestClient is None:
+        pytest.skip("TestClient unavailable in this environment")
+
+    monkeypatch.setenv("ALLOW_PARTIAL_PAYLOAD", "1")
+    online_metrics_path = tmp_path / "logs" / "online_metrics.jsonl"
+    monkeypatch.setenv("ONLINE_METRICS_PATH", str(online_metrics_path))
+    monkeypatch.setattr("app.routes.deps.get_prediction_context", lambda: _ctx(["a", "b", "c"]))
+    monkeypatch.setattr(
+        "app.routes.deps.get_model",
+        lambda: {"model": DummyModel(), "model_loaded": True, "notes": ["model_loaded_ok"]},
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/predict", json={"a": 1})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["count"] == 1
+    prediction = body["predictions"][0]
+    assert prediction["risk_proba"] == pytest.approx(0.8)
+    notes = prediction["notes"] or []
+    assert any(str(note).startswith("missing_cols_rate=") for note in notes)
+    assert any(str(note).startswith("missing_values_rate=") for note in notes)
+    assert any(str(note) == "allow_partial_payload=1" for note in notes)
+
+    lines = online_metrics_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    event = json.loads(lines[0])
+    assert event["status_code"] == 200
+    assert event["status_family"] == "2xx"
+    assert event["n_records"] == 1
+    assert event["score_histogram"] is not None
+    assert event["positive_rate_at_threshold"] == pytest.approx(1.0)
 
 
 def test_predict_batch_too_large_returns_400(monkeypatch: pytest.MonkeyPatch) -> None:

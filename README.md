@@ -1019,6 +1019,27 @@ curl -s http://localhost:8000/version
   - body/JSON/tipo inválido: `422` (FastAPI/Pydantic)
   - metadata/model indisponíveis: `503`
 
+### Alunos novos (sem histórico)
+
+- Padrão (`ALLOW_PARTIAL_PAYLOAD=0`, default):
+  - o payload deve conter todas as colunas de `expected_raw_cols`
+  - colunas faltantes retornam `400` com `missing_columns`
+- Modo opcional (`ALLOW_PARTIAL_PAYLOAD=1`):
+  - payload parcial é aceito (mantendo o mesmo contrato base de colunas esperadas)
+  - colunas faltantes são preenchidas com `NA` (`pd.NA`) no `reindex`
+  - a imputação da pipeline (`SimpleImputer`) resolve os faltantes (sem valores "mágicos")
+  - extras leakage-like continuam bloqueadas com `400` (mesmo com payload parcial)
+- Observabilidade (sem PII):
+  - `POST /predict` registra 1 log agregado por request/batch com `count_records`, `status_code`, `allow_partial_*`, taxas de missing e contagem de extras
+  - erros estruturais `422` (FastAPI/Pydantic, antes do handler de rota) também são registrados de forma agregada via exception handler global, sem logar payload/valores
+  - não loga payload, `RA`, IDs ou valores de célula
+  - as taxas de missing usam como base `expected_raw_cols` do metadata de serving (contrato raw da API)
+- Resposta:
+  - sem breaking change no schema
+  - a API pode incluir resumo de missing em `predictions[*].notes` (ex.: `missing_cols_rate`, `missing_values_rate`)
+- Semântica de missing:
+  - as métricas usam `isna()`/`pd.NA`; strings vazias (`""`) não são tratadas como missing nessa contabilização
+
 Exemplo `curl` (single):
 
 ```bash
@@ -1074,6 +1095,64 @@ Exemplo de resposta:
 }
 ```
 
+## Mensuração em Produção (Ground Truth Delay) (Fase 7)
+
+Como o rótulo de negócio (`Defasagem_{t+1}`) chega com atraso, a mensuração em produção é separada em dois blocos:
+
+- ONLINE (sem rótulo, imediato):
+  - objetivo: saúde do serviço + comportamento das predições + qualidade de entrada
+  - fonte: eventos agregados por request/batch em `logs/online_metrics.jsonl`
+  - cada evento registra apenas agregados (sem PII), por exemplo:
+    - `generated_at`, `status_code`, `status_family`, `reason_code`
+    - `model_version`, `model_family`, `variant`, `threshold`
+    - `n_records`
+    - `score_histogram` (histograma de `risk_proba`, sem probabilidades individuais)
+    - `positive_rate_at_threshold` e `n_positive_at_threshold`
+    - métricas de qualidade de input (`missing_cols_rate`, `missing_values_rate`, etc.)
+  - observação:
+    - o evento registra `status_family` (`2xx`/`4xx`/`5xx`)
+    - a **taxa de erro agregada** deve ser calculada posteriormente a partir da agregação desses eventos (não por evento individual)
+  - cobertura de erro:
+    - requests `2xx/4xx/5xx` do `/predict`
+    - erros estruturais `422` (FastAPI/Pydantic, antes da rota) via exception handler global
+
+- OFFLINE (com rótulo, pós-fato):
+  - objetivo: métricas oficiais de performance quando `t+1` chega
+  - abordagem adotada: **replay determinístico** do período usando dataset completo (sem logs com `RA`)
+  - por que replay:
+    - evita PII em logs de produção (não armazenamos `RA`)
+    - é aceitável no contexto acadêmico/local
+  - comando:
+
+```bash
+python -m src.offline_evaluation \
+  --dataset-path "dataset/DATATHON/BASE DE DADOS PEDE 2024 - DATATHON.xlsx" \
+  --model-dir app/model \
+  --year-t 2023 \
+  --year-t1 2024 \
+  --out-json artifacts/offline_metrics_2023_2024.json \
+  --out-md artifacts/offline_metrics_2023_2024.md
+```
+
+- O relatório offline registra agregados como:
+  - `model_version`, `model_family`, `variant`
+  - par `year_t -> year_t1`
+  - `threshold_operational` (extraído do metadata de serving)
+  - `n`, `n_pos`, `prevalence`
+  - `Recall`, `Precision`, `F1`, `ROC-AUC`, `PR-AUC`
+  - matriz de confusão no threshold operacional
+
+- Política operacional recomendada:
+  - ONLINE: revisar periodicamente histograma, `positive_rate`, erros (`4xx/5xx/422`) e qualidade de input
+  - OFFLINE: rodar quando os dados de `t+1` chegarem (ex.: ciclo anual)
+  - Guardrails:
+    - drift severo / `positive_rate` anômala: investigar inputs, threshold e versão
+    - queda de Recall/PR-AUC no offline: avaliar retreino e promoção de nova versão
+
+- Privacidade:
+  - não logar `RA`, listas de IDs, payload raw, valores de célula ou probabilidades individuais
+  - logs/artefatos de monitoramento devem conter apenas contagens, histogramas e taxas agregadas
+
 ## CI (GitHub Actions) (Fase 7)
 
 - Workflow em `.github/workflows/ci.yml`
@@ -1093,9 +1172,9 @@ Este checklist foi elaborado considerando explicitamente as inconsistências rea
 Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 
 Progresso geral (barra visual):
-`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜]`
+`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜]`
 
-`92 de 113 tarefas concluídas (81.4%)`
+`97 de 113 tarefas concluídas (85.8%)`
 
 | Fase | Progresso |
 |---|---|
@@ -1105,9 +1184,9 @@ Progresso geral (barra visual):
 | Fase 4 - Pré-processamento e Engenharia de Features | 10/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 17/17 |
 | Fase 6 - Artefatos, API e Deploy | 16/16 |
-| Fase 7 - Testes, Monitoramento e Dashboard | 3/13 |
-| Fase 8 - Documentação e Entrega Final | 12/23 |
-| Total | 92/113 |
+| Fase 7 - Testes, Monitoramento e Dashboard | 7/13 |
+| Fase 8 - Documentação e Entrega Final | 13/23 |
+| Total | 97/113 |
 
 Nota:
 - A `Fase 9` é opcional e fica fora da contagem oficial de progresso (`barra`, `X/Y` e `%`).
@@ -1211,14 +1290,14 @@ Nota de shift temporal:
 - [x] Definir estratégia de promoção de modelo (staging -> prod local) com critério objetivo (Recall/PR-AUC/threshold)
 - [x] Documentar procedimento de atualização do modelo na API (troca de versão e rollback local)
 
-### Fase 7 - Testes, Monitoramento e Dashboard [3/13]
+### Fase 7 - Testes, Monitoramento e Dashboard [7/13]
 - [x] Criar testes unitários e de integração com pytest
 - [x] Garantir cobertura mínima de 80% com `pytest-cov`
 - [x] Adicionar CI automatizada (rodar `pytest`, coverage, `python -m src.validate` e `python -m src.cohort_stats`)
-- [ ] Definir comportamento para alunos novos (sem histórico): validação de contrato, imputação/valores default e logging da taxa de campos ausentes
-- [ ] Definir estratégia de mensuração em produção com "ground truth delay" (métricas online vs métricas offline quando o rótulo chega)
-- [ ] Implementar logging agregado de inferência (distribuição de scores, taxa de positivos por threshold, taxa de erro de validação) sem PII
-- [ ] Implementar rotina de avaliação pós-fato (quando labels `t+1` chegam) para medir Recall/PR-AUC em produção (mesmo que simulado)
+- [x] Definir comportamento para alunos novos (sem histórico): validação de contrato, imputação/valores default e logging da taxa de campos ausentes
+- [x] Definir estratégia de mensuração em produção com "ground truth delay" (métricas online vs métricas offline quando o rótulo chega)
+- [x] Implementar logging agregado de inferência (distribuição de scores, taxa de positivos por threshold, taxa de erro de validação) sem PII (`logs/online_metrics.jsonl` + eventos agregados `2xx/4xx/5xx/422`)
+- [x] Implementar rotina de avaliação pós-fato (quando labels `t+1` chegam) para medir Recall/PR-AUC em produção (mesmo que simulado) (`python -m src.offline_evaluation`)
 - [ ] Definir política de retenção/limpeza de logs e artefatos locais (script simples + documentação)
 - [ ] Implementar teste de não-regressão do modelo com limiares mínimos de métricas (ex.: Recall e/ou PR-AUC)
 - [ ] Configurar logging estruturado
@@ -1226,7 +1305,7 @@ Nota de shift temporal:
 - [ ] Implementar relatório de drift com Evidently
 - [ ] Criar aplicação Streamlit para visualização do relatório de drift
 
-### Fase 8 - Documentação e Entrega Final [12/23]
+### Fase 8 - Documentação e Entrega Final [13/23]
 - [x] Documentar visão geral do problema e objetivo
 - [ ] Documentar stack tecnológica
 - [ ] Adicionar versionamento/changelog dos contratos (`docs/contracts`)
@@ -1240,7 +1319,7 @@ Nota de shift temporal:
 - [x] Documentar setup de ambiente local com `.venv` e instalação de dependências
 - [x] Publicar código organizado no GitHub (PR `#1` aberta via GitHub CLI)
 - [x] Mesclar PR na `main` via GitHub CLI (PR `#1` mesclada)
-- [ ] [DOING] Commitar checklist, abrir PR de atualização, mesclar na `main` e limpar branch local
+- [x] Commitar checklist, abrir PR de atualização, mesclar na `main` e limpar branch local (PR `#2` mesclada)
 - [ ] Disponibilizar API acessível localmente
 - [ ] Gravar vídeo gerencial (<= 5 minutos) explicando a solução
 - [x] Criar `agents.md` com convenções operacionais para agentes LLM
