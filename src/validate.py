@@ -101,6 +101,39 @@ def _build_markdown_report(report: dict[str, Any]) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
+def _persist_skip_dataset_report(
+    *,
+    output_dir: str | Path = "artifacts",
+    write_markdown: bool = False,
+) -> dict[str, Any]:
+    """Persist a minimal CI-friendly report when dataset is intentionally unavailable."""
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    report: dict[str, Any] = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "status": "SKIPPED",
+        "reason": "dataset_not_available_in_ci",
+        "notes": ["ran_in_ci_skip_mode"],
+    }
+
+    json_path = output_path / "data_quality_report.json"
+    json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    if write_markdown:
+        md_path = output_path / "data_quality_report.md"
+        md_path.write_text(
+            "# Relatorio de Qualidade de Dados\n\n"
+            "- Status: `SKIPPED`\n"
+            "- Reason: `dataset_not_available_in_ci`\n"
+            "- Notes: `ran_in_ci_skip_mode`\n",
+            encoding="utf-8",
+        )
+
+    _logger.warning("Data quality validation skipped | reason=%s report=%s", report["reason"], json_path)
+    return report
+
+
 def _validate_ra(year: int, df: pd.DataFrame, errors: list[str]) -> dict[str, int]:
     if "RA" not in df.columns:
         errors.append(f"[year={year}] ERROR: coluna RA ausente.")
@@ -470,12 +503,29 @@ def _parse_args() -> argparse.Namespace:
         default="docs/contracts",
         help="Diretório de contratos versionados (data_contract_YYYY.json).",
     )
+    parser.add_argument(
+        "--skip-dataset",
+        action="store_true",
+        help="Skip XLSX loading (CI mode). Writes minimal SKIPPED JSON report and exits 0.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = _parse_args()
     setup_logging()
+
+    if args.skip_dataset:
+        report = _persist_skip_dataset_report(
+            output_dir=args.output_dir,
+            write_markdown=not args.no_markdown,
+        )
+        _logger.info(
+            "Data quality CLI summary | status=%s reason=%s",
+            report["status"],
+            report["reason"],
+        )
+        return
 
     dataset_path = Path(args.dataset_path) if args.dataset_path else get_default_dataset_path()
     dfs, align_metadata, coercion = load_pede_workbook_with_metadata(dataset_path)
