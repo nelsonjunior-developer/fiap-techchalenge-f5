@@ -659,6 +659,78 @@ Referências:
   - `app/model/promoted_model.json` registra vencedor, source/dest, hashes `sha256` e timestamp;
   - `app/model/backups/<timestamp>/` guarda snapshot do modelo anterior quando `--backup 1`.
 
+## Promoção (Staging -> Prod Local) (Fase 6)
+
+- A promoção local agora aplica **policy objetiva** antes de copiar artefatos:
+  - métrica principal: `Recall` no holdout
+  - métrica secundária: `PR-AUC` no holdout
+  - threshold oficial: `0.30` (fallback `0.5` com warning explícito)
+- Regras operacionais:
+  - `selection.status = PASS` => promoção permitida (`ALLOW`)
+  - `selection.status = WARNING` => promoção permitida **somente** com override (`--allow-warning 1`)
+  - `selection.status = FAIL` => promoção bloqueada (`BLOCK`)
+- Staging e prod locais:
+  - `app/model/staging/` (staging)
+  - `app/model/` (prod local)
+- Manifestos:
+  - staging: `app/model/staging/staging_manifest.json`
+  - prod: `app/model/promoted_model.json`
+  - ambos incluem decisão da policy, threshold usado e métricas (`recall/pr_auc/positive_rate`) + hashes
+
+Fluxo sugerido:
+
+```bash
+# 1) Treinar candidatos (baseline/hgb)
+python -m src.train_baseline ...
+python -m src.train_hgb ...
+
+# 2) Selecionar campeão formalmente
+python -m src.model_selection --models-root artifacts/models
+
+# 3) Stage (não mexe no prod local)
+python -m src.promote_model \
+  --selection-path artifacts/model_selection.json \
+  --models-root artifacts/models \
+  --out-dir app/model/staging \
+  --stage-only 1
+
+# 4) Promote de staging para prod local
+python -m src.promote_model \
+  --selection-path artifacts/model_selection.json \
+  --from-staging app/model/staging \
+  --out-dir app/model \
+  --promote 1
+```
+
+Override (quando `model_selection.status = WARNING`):
+
+```bash
+python -m src.promote_model \
+  --selection-path artifacts/model_selection.json \
+  --models-root artifacts/models \
+  --out-dir app/model/staging \
+  --stage-only 1 \
+  --allow-warning 1
+```
+
+Rollback local:
+- usar snapshots em `app/model/backups/<timestamp>/`
+- promover novamente a versão desejada (ou restaurar `model.joblib`/`metadata.json` manualmente a partir do backup)
+
+## Versionamento Local de Modelos (Releases) (Fase 6)
+
+- O projeto mantém dois níveis de artefatos:
+  - `artifacts/models/<family>/<variant>/` = **build artifacts** (saída de treino por variante)
+  - `artifacts/models/releases/<model_version>/` = **release imutável** (cópia versionada para rastreabilidade/rollback)
+- Cada release contém:
+  - `model.joblib`
+  - `metadata.json` (cópia enriquecida com `model_version`/`trained_at` quando necessário)
+  - `release.json` (manifesto leve com identidade, hashes e paths)
+- Comando oficial:
+  - `python -m src.create_release --selection-path artifacts/model_selection.json --out-root artifacts/models/releases`
+- Observação operacional:
+  - a promoção da API continua usando o campeão do `model_selection`; o release versionado facilita rollback e auditoria local.
+
 ## Metadata do Modelo (Serving) (Fase 6)
 
 - O `metadata.json` de serving (`app/model/metadata.json`) segue schema mínimo validável para operação da API e monitoramento:
@@ -886,9 +958,9 @@ Este checklist foi elaborado considerando explicitamente as inconsistências rea
 Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 
 Progresso geral (barra visual):
-`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
+`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`86 de 111 tarefas concluídas (77.5%)`
+`88 de 111 tarefas concluídas (79.3%)`
 
 | Fase | Progresso |
 |---|---|
@@ -897,10 +969,10 @@ Progresso geral (barra visual):
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 14/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 10/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 17/17 |
-| Fase 6 - Artefatos, API e Deploy | 13/16 |
+| Fase 6 - Artefatos, API e Deploy | 15/16 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 2/13 |
 | Fase 8 - Documentação e Entrega Final | 10/21 |
-| Total | 86/111 |
+| Total | 88/111 |
 
 Nota:
 - A `Fase 9` é opcional e fica fora da contagem oficial de progresso (`barra`, `X/Y` e `%`).
@@ -986,7 +1058,7 @@ Nota de shift temporal:
 - [x] Justificar escolha do modelo final
 - [x] Incluir validação de shift temporal do target e das features antes do treinamento final
 
-### Fase 6 - Artefatos, API e Deploy [13/16]
+### Fase 6 - Artefatos, API e Deploy [15/16]
 - [x] Salvar pipeline completa em `model.joblib`
 - [x] Criar `metadata.json` com modelo, métricas, threshold, features esperadas, data do treino e versões das bibliotecas
 - [x] Salvar dados de referência para monitoramento de drift
@@ -1000,8 +1072,8 @@ Nota de shift temporal:
 - [x] Garantir carregamento do modelo salvo
 - [x] Criar Dockerfile enxuto baseado em `python:slim`
 - [x] Documentar comandos de build e run no README
-- [ ] Implementar versionamento de modelos local (ex.: `artifacts/models/<model_version>/` com `model.joblib` + `metadata.json`)
-- [ ] Definir estratégia de promoção de modelo (staging -> prod local) com critério objetivo (Recall/PR-AUC/threshold)
+- [x] Implementar versionamento de modelos local (ex.: `artifacts/models/releases/<model_version>/` com `model.joblib` + `metadata.json`)
+- [x] Definir estratégia de promoção de modelo (staging -> prod local) com critério objetivo (Recall/PR-AUC/threshold)
 - [ ] Documentar procedimento de atualização do modelo na API (troca de versão e rollback local)
 
 ### Fase 7 - Testes, Monitoramento e Dashboard [2/13]

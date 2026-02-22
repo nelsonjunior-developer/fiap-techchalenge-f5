@@ -37,6 +37,7 @@ from src.metrics import (
     compute_prevalence,
     summarize_proba,
 )
+from src.model_versioning import make_model_version
 from src.thresholding import evaluate_at_threshold, select_threshold_by_recall
 from src.train_pipeline import build_model_pipeline
 from src.training_policy import OFFICIAL_TRAIN_PAIR, enforce_official_train_pair
@@ -286,7 +287,7 @@ def _build_metadata_payload(
     cv_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     trained_at = datetime.now(timezone.utc).isoformat()
-    model_version = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    model_version = make_model_version(trained_at, model_joblib_sha256)
     engineered_names = get_engineered_feature_names(enable_age_bucket=enable_age_bucket)
     engineered_cols: list[str] = []
     if enable_feature_engineering:

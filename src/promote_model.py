@@ -18,6 +18,7 @@ from src.config import RANDOM_STATE
 from src.dataset_versioning import safe_path_hint
 from src.features import get_engineered_feature_names
 from src.metadata_schema import validate_metadata
+from src.promotion_policy import promotion_decision
 from src.utils import get_logger, setup_logging
 
 _logger = get_logger(__name__)
@@ -29,6 +30,13 @@ def _safe_read_json(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"Invalid JSON payload (expected object): {path}")
     return payload
+
+
+def _safe_rel_path(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(Path.cwd().resolve()))
+    except Exception:
+        return str(path)
 
 
 def _sha256(path: Path) -> str:
@@ -110,6 +118,26 @@ def _resolve_winner_paths(
         },
         "src_model": src_model,
         "src_meta": src_meta,
+    }
+
+
+def _resolve_staging_paths(staging_dir: Path) -> dict[str, Any]:
+    src_model = staging_dir / "model.joblib"
+    src_meta = staging_dir / "metadata.json"
+    if not src_model.exists():
+        raise FileNotFoundError(f"Staging model.joblib not found: {src_model}")
+    if not src_meta.exists():
+        raise FileNotFoundError(f"Staging metadata.json not found: {src_meta}")
+
+    metadata = _safe_read_json(src_meta)
+    return {
+        "winner": {
+            "model_family": str(metadata.get("model_family") or "unknown"),
+            "variant": str(metadata.get("variant") or "unknown"),
+        },
+        "src_model": src_model,
+        "src_meta": src_meta,
+        "metadata": metadata,
     }
 
 
@@ -653,6 +681,18 @@ def _enrich_metadata_for_serving(
     return enriched
 
 
+def _resolve_policy_decision(
+    *,
+    selection_path: Path,
+    source_metadata: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if not selection_path.exists():
+        raise FileNotFoundError(f"Selection artifact not found: {selection_path}")
+    selection_payload = _safe_read_json(selection_path)
+    decision = promotion_decision(selection_payload, winner_metadata=source_metadata)
+    return selection_payload, decision
+
+
 def run_model_promotion(
     *,
     selection_path: str | Path = "artifacts/model_selection.json",
@@ -660,22 +700,67 @@ def run_model_promotion(
     out_dir: str | Path = "app/model",
     force: bool = False,
     backup: bool = True,
+    stage_only: bool = False,
+    promote: bool = False,
+    from_staging: str | Path | None = None,
+    allow_warning: bool = False,
 ) -> dict[str, Any]:
-    selection_path_obj = Path(selection_path)
-    if not selection_path_obj.exists():
-        raise FileNotFoundError(f"Selection artifact not found: {selection_path_obj}")
-    selection_payload = _safe_read_json(selection_path_obj)
-    resolved = _resolve_winner_paths(
-        selection_payload=selection_payload,
-        models_root=Path(models_root),
-    )
+    if bool(stage_only) and bool(promote):
+        raise ValueError("Flags --stage-only and --promote are mutually exclusive.")
+    if bool(promote) and not from_staging:
+        raise ValueError("Flag --promote 1 requires --from-staging <dir>.")
+    if from_staging and not bool(promote):
+        raise ValueError("Flag --from-staging requires --promote 1.")
 
-    src_model = Path(resolved["src_model"])
-    src_meta = Path(resolved["src_meta"])
-    winner = dict(resolved["winner"])
+    selection_path_obj = Path(selection_path)
+
+    mode = "direct"
+    if bool(stage_only):
+        mode = "stage_only"
+    elif bool(promote):
+        mode = "promote_from_staging"
+
+    if bool(stage_only) and str(out_dir) == "app/model":
+        out_dir = str(Path("app/model") / "staging")
+
+    source_metadata_for_policy: dict[str, Any]
+    if bool(promote):
+        staging_dir = Path(from_staging or "")
+        resolved = _resolve_staging_paths(staging_dir)
+        src_model = Path(resolved["src_model"])
+        src_meta = Path(resolved["src_meta"])
+        winner = dict(resolved["winner"])
+        source_metadata_for_policy = dict(resolved["metadata"])
+    else:
+        if not selection_path_obj.exists():
+            raise FileNotFoundError(f"Selection artifact not found: {selection_path_obj}")
+        selection_payload = _safe_read_json(selection_path_obj)
+        resolved = _resolve_winner_paths(
+            selection_payload=selection_payload,
+            models_root=Path(models_root),
+        )
+        src_model = Path(resolved["src_model"])
+        src_meta = Path(resolved["src_meta"])
+        winner = dict(resolved["winner"])
+        source_metadata_for_policy = _safe_read_json(src_meta)
+
+    selection_payload, policy_decision = _resolve_policy_decision(
+        selection_path=selection_path_obj,
+        source_metadata=source_metadata_for_policy,
+    )
+    if policy_decision["decision"] == "BLOCK":
+        raise ValueError(f"Promotion blocked by policy: {policy_decision['reason']}")
+    if policy_decision["decision"] == "ALLOW_WITH_OVERRIDE" and not bool(allow_warning):
+        raise ValueError(
+            "Promotion requires --allow-warning 1 because selection/policy status is WARNING."
+        )
 
     out_dir_path = Path(out_dir)
     out_dir_path.mkdir(parents=True, exist_ok=True)
+    if bool(promote) and from_staging:
+        staging_dir_resolved = Path(from_staging)
+        if out_dir_path.resolve() == staging_dir_resolved.resolve():
+            raise ValueError("Destination out_dir must differ from --from-staging directory.")
     dest_model = out_dir_path / "model.joblib"
     dest_meta = out_dir_path / "metadata.json"
 
@@ -722,31 +807,60 @@ def run_model_promotion(
         encoding="utf-8",
     )
 
+    policy_eval = (
+        dict(policy_decision.get("policy_evaluation"))
+        if isinstance(policy_decision.get("policy_evaluation"), dict)
+        else {}
+    )
+    metrics_used = dict(policy_eval.get("metrics")) if isinstance(policy_eval.get("metrics"), dict) else {}
+    promoted_model_version = str(metadata_payload.get("model_version") or "")
+
+    manifest_filename = "staging_manifest.json" if bool(stage_only) else "promoted_model.json"
+    manifest_path = out_dir_path / manifest_filename
+
     promoted_payload = {
+        "mode": mode,
         "promoted_at": promoted_at,
+        "decision": {
+            "status": str(policy_decision.get("status") or "UNKNOWN"),
+            "decision": str(policy_decision.get("decision") or "BLOCK"),
+            "reason": str(policy_decision.get("reason") or ""),
+            "selection_status": str(policy_decision.get("selection_status") or "UNKNOWN"),
+            "allow_warning_used": bool(allow_warning),
+        },
+        "policy_evaluation": policy_eval,
         "winner": {
             "model_family": winner["model_family"],
             "variant": winner["variant"],
         },
+        "model_version": promoted_model_version or None,
         "source_paths": {
-            "model": str(src_model),
-            "metadata": str(src_meta),
+            "model": _safe_rel_path(src_model),
+            "metadata": _safe_rel_path(src_meta),
         },
         "dest_paths": {
-            "model": str(dest_model),
-            "metadata": str(dest_meta),
+            "model": _safe_rel_path(dest_model),
+            "metadata": _safe_rel_path(dest_meta),
+            "manifest": _safe_rel_path(manifest_path),
         },
         "sha256": {
             "model": model_sha,
             "metadata": _sha256(dest_meta),
+        },
+        "summary": {
+            "threshold_used": _to_float_or_none(policy_eval.get("threshold_used")),
+            "recall_holdout": _to_float_or_none(metrics_used.get("recall")),
+            "pr_auc_holdout": _to_float_or_none(metrics_used.get("pr_auc")),
+            "positive_rate_holdout": _to_float_or_none(metrics_used.get("positive_rate")),
         },
         "backup": {
             "enabled": bool(backup),
             "path": str(backup_path) if backup_path is not None else None,
         },
         "notes": [
-            "promotion copies the winning pipeline artifact for serving",
+            "promotion copies a selected pipeline artifact for local serving",
             "app/model/model.joblib is the fixed serving path for future API loading",
+            "staging mode writes app/model/staging/* and does not overwrite production serving path",
         ],
     }
 
@@ -757,8 +871,7 @@ def run_model_promotion(
             f"Privacy check failed: forbidden keys found in promotion payload: {forbidden}"
         )
 
-    promoted_path = out_dir_path / "promoted_model.json"
-    promoted_path.write_text(
+    manifest_path.write_text(
         json.dumps(promoted_payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
@@ -801,6 +914,33 @@ def _parse_args() -> argparse.Namespace:
         default=1,
         help="If 1, backup existing destination model/metadata before overwrite.",
     )
+    parser.add_argument(
+        "--stage-only",
+        type=int,
+        choices=[0, 1],
+        default=0,
+        help="If 1, copy winner to staging directory (does not touch prod app/model).",
+    )
+    parser.add_argument(
+        "--promote",
+        type=int,
+        choices=[0, 1],
+        default=0,
+        help="If 1, promote from --from-staging directory into --out-dir.",
+    )
+    parser.add_argument(
+        "--from-staging",
+        type=str,
+        default=None,
+        help="Staging directory containing model.joblib + metadata.json for promote mode.",
+    )
+    parser.add_argument(
+        "--allow-warning",
+        type=int,
+        choices=[0, 1],
+        default=0,
+        help="If 1, allow promotion when policy decision is ALLOW_WITH_OVERRIDE (WARNING).",
+    )
     return parser.parse_args()
 
 
@@ -814,6 +954,10 @@ def main() -> None:
             out_dir=args.out_dir,
             force=_parse_bool_flag(args.force),
             backup=_parse_bool_flag(args.backup),
+            stage_only=_parse_bool_flag(args.stage_only),
+            promote=_parse_bool_flag(args.promote),
+            from_staging=args.from_staging,
+            allow_warning=_parse_bool_flag(args.allow_warning),
         )
     except (FileNotFoundError, ValueError) as exc:
         _logger.error("%s", exc)

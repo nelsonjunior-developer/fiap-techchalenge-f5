@@ -175,3 +175,26 @@ def test_threshold_fallback_from_030_to_05_adds_warning(tmp_path: Path) -> None:
     report = select_best_model(discovered)
     assert report["status"] == "WARNING"
     assert any("fallback threshold 0.5 used" in warning.lower() for warning in report["warnings"])
+
+
+def test_discovery_ignores_release_directories(tmp_path: Path) -> None:
+    models_root = tmp_path / "models"
+    _write_metadata(
+        models_root,
+        "baseline_logreg",
+        "none",
+        holdout_030={"recall": 0.60, "pr_auc": 0.62, "positive_rate": 0.45},
+    )
+
+    release_dir = models_root / "releases" / "2026-02-22T14-05-33Z__deadbeef"
+    release_dir.mkdir(parents=True, exist_ok=True)
+    (release_dir / "model.joblib").write_bytes(b"release")
+    (release_dir / "metadata.json").write_text(
+        json.dumps({"variant": "release-copy"}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    discovered = discover_model_metadatas(models_root)
+    keys = {(item["model_family"], item["variant"]) for item in discovered}
+    assert ("baseline_logreg", "none") in keys
+    assert all(family != "releases" for family, _ in keys)

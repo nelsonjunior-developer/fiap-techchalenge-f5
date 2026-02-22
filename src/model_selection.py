@@ -13,6 +13,7 @@ from src.utils import get_logger, setup_logging
 _logger = get_logger(__name__)
 _FORBIDDEN_KEYS = {"ra", "ra_list", "ids", "student_ids", "students", "records"}
 _RANKING_ORDER = ["recall_desc", "pr_auc_desc", "positive_rate_asc", "name_lex"]
+_ALLOWED_MODEL_FAMILIES = {"baseline_logreg", "nonlinear_hgb"}
 
 
 def _safe_read_json(path: Path) -> dict[str, Any]:
@@ -130,6 +131,8 @@ def discover_model_metadatas(models_root: str | Path = "artifacts/models") -> li
         if len(rel.parts) < 3:
             continue
         model_family = str(rel.parts[0])
+        if model_family not in _ALLOWED_MODEL_FAMILIES:
+            continue
         variant = str(rel.parts[1])
         model_path = metadata_path.parent / "model.joblib"
         try:

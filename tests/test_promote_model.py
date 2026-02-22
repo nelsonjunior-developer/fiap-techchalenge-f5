@@ -197,6 +197,12 @@ def _build_basic_fixture(root: Path) -> tuple[Path, Path, Path]:
     return selection_path, models_root, out_dir
 
 
+def _set_selection_status(selection_path: Path, status: str) -> None:
+    payload = json.loads(selection_path.read_text(encoding="utf-8"))
+    payload["status"] = status
+    _write_json(selection_path, payload)
+
+
 def test_promote_model_happy_path(tmp_path: Path) -> None:
     selection_path, models_root, out_dir = _build_basic_fixture(tmp_path)
     promoted = run_model_promotion(
@@ -220,6 +226,10 @@ def test_promote_model_happy_path(tmp_path: Path) -> None:
     assert isinstance(promoted_payload["sha256"]["metadata"], str)
     assert len(promoted_payload["sha256"]["metadata"]) == 64
     assert promoted["dest_paths"]["model"] == str(dest_model)
+    assert promoted_payload["decision"]["decision"] == "ALLOW"
+    assert promoted_payload["summary"]["threshold_used"] == pytest.approx(0.30)
+    assert promoted_payload["summary"]["recall_holdout"] == pytest.approx(0.72)
+    assert promoted_payload["summary"]["pr_auc_holdout"] == pytest.approx(0.64)
 
     promoted_metadata = json.loads(dest_meta.read_text(encoding="utf-8"))
     ok, errors = validate_metadata(promoted_metadata)
@@ -278,6 +288,70 @@ def test_backup_enabled_creates_backup_snapshot(tmp_path: Path) -> None:
     assert (out_dir / "model.joblib").read_bytes() == b"MODEL_V1"
 
 
+def test_warning_selection_requires_allow_warning_flag(tmp_path: Path) -> None:
+    selection_path, models_root, out_dir = _build_basic_fixture(tmp_path)
+    _set_selection_status(selection_path, "WARNING")
+
+    with pytest.raises(ValueError, match="allow-warning 1"):
+        run_model_promotion(
+            selection_path=selection_path,
+            models_root=models_root,
+            out_dir=out_dir,
+            force=False,
+            backup=True,
+            allow_warning=False,
+        )
+
+    promoted = run_model_promotion(
+        selection_path=selection_path,
+        models_root=models_root,
+        out_dir=out_dir,
+        force=False,
+        backup=True,
+        allow_warning=True,
+    )
+    assert promoted["decision"]["decision"] == "ALLOW_WITH_OVERRIDE"
+    assert promoted["decision"]["allow_warning_used"] is True
+    promoted_payload = json.loads((out_dir / "promoted_model.json").read_text(encoding="utf-8"))
+    assert promoted_payload["decision"]["decision"] == "ALLOW_WITH_OVERRIDE"
+
+
+def test_stage_only_then_promote_from_staging_flow(tmp_path: Path) -> None:
+    selection_path, models_root, prod_dir = _build_basic_fixture(tmp_path)
+    stage_dir = tmp_path / "app" / "model" / "staging"
+
+    staged = run_model_promotion(
+        selection_path=selection_path,
+        models_root=models_root,
+        out_dir=stage_dir,
+        force=False,
+        backup=True,
+        stage_only=True,
+    )
+    assert staged["mode"] == "stage_only"
+    assert (stage_dir / "model.joblib").exists()
+    assert (stage_dir / "metadata.json").exists()
+    assert (stage_dir / "staging_manifest.json").exists()
+    assert not (stage_dir / "promoted_model.json").exists()
+
+    promoted = run_model_promotion(
+        selection_path=selection_path,
+        models_root=models_root,
+        out_dir=prod_dir,
+        force=False,
+        backup=True,
+        promote=True,
+        from_staging=stage_dir,
+    )
+    assert promoted["mode"] == "promote_from_staging"
+    assert (prod_dir / "model.joblib").exists()
+    assert (prod_dir / "metadata.json").exists()
+    assert (prod_dir / "promoted_model.json").exists()
+    promoted_payload = json.loads((prod_dir / "promoted_model.json").read_text(encoding="utf-8"))
+    assert promoted_payload["source_paths"]["model"].endswith("app/model/staging/model.joblib")
+    assert promoted_payload["dest_paths"]["manifest"].endswith("app/model/promoted_model.json")
+
+
 def test_invalid_selection_or_missing_source_fail_with_system_exit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -329,6 +403,18 @@ def test_invalid_selection_or_missing_source_fail_with_system_exit(
     with pytest.raises(SystemExit) as exc2:
         promote_main()
     assert exc2.value.code == 1
+
+
+def test_promote_flag_requires_from_staging(tmp_path: Path) -> None:
+    selection_path, models_root, out_dir = _build_basic_fixture(tmp_path)
+    with pytest.raises(ValueError, match="requires --from-staging"):
+        run_model_promotion(
+            selection_path=selection_path,
+            models_root=models_root,
+            out_dir=out_dir,
+            promote=True,
+            from_staging=None,
+        )
 
 
 def test_promote_model_legacy_metadata_without_dataset_sha_adds_null_and_note(
