@@ -767,6 +767,40 @@ Exemplo `GET /version` (sem metadata carregado):
 }
 ```
 
+## Docker (Deploy Local) (Fase 6)
+
+- A imagem usa `python:3.11-slim`, instala dependências via `requirements.txt` e roda `uvicorn` como usuário não-root
+- `dataset/` e `artifacts/` não entram no build context (ver `.dockerignore`)
+- A API sobe mesmo sem modelo promovido (`/health` e `/version` ok; `/predict` retorna `503`)
+
+Build:
+
+```bash
+docker build -t fiap-ml-api .
+```
+
+Run (sem modelo promovido):
+
+```bash
+docker run --rm -p 8000:8000 fiap-ml-api
+```
+
+Run (com modelo promovido montado em volume):
+
+```bash
+docker run --rm -p 8000:8000 \
+  -v "$(pwd)/app/model:/app/app/model" \
+  -e LOG_LEVEL=INFO \
+  fiap-ml-api
+```
+
+Testar:
+
+```bash
+curl -s http://localhost:8000/health
+curl -s http://localhost:8000/version
+```
+
 ## Carregamento do Modelo (Serving) (Fase 6)
 
 - O artefato servido é `app/model/model.joblib` (promovido via `python -m src.promote_model`)
@@ -854,7 +888,7 @@ Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 Progresso geral (barra visual):
 `[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]`
 
-`83 de 110 tarefas concluídas (75.5%)`
+`86 de 111 tarefas concluídas (77.5%)`
 
 | Fase | Progresso |
 |---|---|
@@ -863,10 +897,10 @@ Progresso geral (barra visual):
 | Fase 3 - Ingestão, Qualidade e Governança de Dados | 14/14 |
 | Fase 4 - Pré-processamento e Engenharia de Features | 10/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 17/17 |
-| Fase 6 - Artefatos, API e Deploy | 10/15 |
+| Fase 6 - Artefatos, API e Deploy | 13/16 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 2/13 |
 | Fase 8 - Documentação e Entrega Final | 10/21 |
-| Total | 83/110 |
+| Total | 86/111 |
 
 Nota:
 - A `Fase 9` é opcional e fica fora da contagem oficial de progresso (`barra`, `X/Y` e `%`).
@@ -952,19 +986,20 @@ Nota de shift temporal:
 - [x] Justificar escolha do modelo final
 - [x] Incluir validação de shift temporal do target e das features antes do treinamento final
 
-### Fase 6 - Artefatos, API e Deploy [10/15]
+### Fase 6 - Artefatos, API e Deploy [13/16]
 - [x] Salvar pipeline completa em `model.joblib`
 - [x] Criar `metadata.json` com modelo, métricas, threshold, features esperadas, data do treino e versões das bibliotecas
 - [x] Salvar dados de referência para monitoramento de drift
 - [x] Versionar dataset de treino/validação (`hash/checksum` + versão usada no experimento)
 - [x] Definir schema formal de saída do modelo/API (probabilidade, classe prevista, threshold aplicado e versão do modelo)
 - [x] Criar aplicação FastAPI
+- [x] Migrar startup da FastAPI para `lifespan` (remover depreciação de `on_event`)
 - [x] Implementar endpoint `POST /predict`
 - [x] Implementar `GET /health` e `GET /version`
 - [x] Validar entradas com Pydantic
 - [x] Garantir carregamento do modelo salvo
-- [ ] Criar Dockerfile enxuto baseado em `python:slim`
-- [ ] Documentar comandos de build e run no README
+- [x] Criar Dockerfile enxuto baseado em `python:slim`
+- [x] Documentar comandos de build e run no README
 - [ ] Implementar versionamento de modelos local (ex.: `artifacts/models/<model_version>/` com `model.joblib` + `metadata.json`)
 - [ ] Definir estratégia de promoção de modelo (staging -> prod local) com critério objetivo (Recall/PR-AUC/threshold)
 - [ ] Documentar procedimento de atualização do modelo na API (troca de versão e rollback local)
