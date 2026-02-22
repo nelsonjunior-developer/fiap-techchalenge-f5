@@ -1209,6 +1209,48 @@ Observações:
   - se o arquivo continuar recebendo append, o `mtime` fica recente e entradas antigas não serão removidas individualmente
   - para retenção fina por evento, o próximo passo recomendado é rotação de arquivos (ex.: diário)
 
+## Não-regressão do Modelo (Fase 7)
+
+O projeto inclui um check de não-regressão do modelo campeão baseado em artefatos JSON, sem depender do dataset no CI.
+
+- CLI: `python -m src.regression_check`
+- Fonte de verdade:
+  - `artifacts/model_selection.json`
+  - `metadata.json` do winner (`winner.path_metadata` ou fallback por `artifacts/models/<family>/<variant>/metadata.json`)
+- Métricas verificadas no holdout:
+  - `Recall` (primária)
+  - `PR-AUC` (secundária)
+- Limiares mínimos (alinhados com seleção/promoção do campeão):
+  - `Recall >= 0.45`
+  - `PR-AUC >= 0.60`
+- Preferência de threshold:
+  - usa `holdout@0.30` quando disponível
+  - fallback para `holdout@0.5` é permitido e retorna `WARNING` (exit code `0`)
+
+Comandos:
+
+```bash
+# Execução padrão (CI-friendly, sem dataset)
+python -m src.regression_check
+
+# Caminhos explícitos
+python -m src.regression_check \
+  --selection-path artifacts/model_selection.json \
+  --models-root artifacts/models
+```
+
+Status e exit code:
+
+- `PASS` -> exit `0`
+- `WARNING` -> exit `0` (ex.: fallback para `0.5`)
+- `SKIPPED` -> exit `0` (sem `model_selection.json`, CI não bloqueia)
+- `FAIL` -> exit `1`
+
+Observação:
+
+- Este check não recalcula métricas; ele valida consistência mínima de qualidade a partir dos artefatos de seleção/metadata.
+- Um modo local de recálculo com dataset real pode ser adicionado depois, mas fica fora do escopo deste check CI-friendly.
+
 ## CI (GitHub Actions) (Fase 7)
 
 - Workflow em `.github/workflows/ci.yml`
@@ -1230,7 +1272,7 @@ Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 Progresso geral (barra visual):
 `[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜]`
 
-`98 de 113 tarefas concluídas (86.7%)`
+`99 de 113 tarefas concluídas (87.6%)`
 
 | Fase | Progresso |
 |---|---|
@@ -1240,9 +1282,9 @@ Progresso geral (barra visual):
 | Fase 4 - Pré-processamento e Engenharia de Features | 10/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 17/17 |
 | Fase 6 - Artefatos, API e Deploy | 16/16 |
-| Fase 7 - Testes, Monitoramento e Dashboard | 8/13 |
+| Fase 7 - Testes, Monitoramento e Dashboard | 9/13 |
 | Fase 8 - Documentação e Entrega Final | 13/23 |
-| Total | 98/113 |
+| Total | 99/113 |
 
 Nota:
 - A `Fase 9` é opcional e fica fora da contagem oficial de progresso (`barra`, `X/Y` e `%`).
@@ -1346,7 +1388,7 @@ Nota de shift temporal:
 - [x] Definir estratégia de promoção de modelo (staging -> prod local) com critério objetivo (Recall/PR-AUC/threshold)
 - [x] Documentar procedimento de atualização do modelo na API (troca de versão e rollback local)
 
-### Fase 7 - Testes, Monitoramento e Dashboard [8/13]
+### Fase 7 - Testes, Monitoramento e Dashboard [9/13]
 - [x] Criar testes unitários e de integração com pytest
 - [x] Garantir cobertura mínima de 80% com `pytest-cov`
 - [x] Adicionar CI automatizada (rodar `pytest`, coverage, `python -m src.validate` e `python -m src.cohort_stats`)
@@ -1355,7 +1397,7 @@ Nota de shift temporal:
 - [x] Implementar logging agregado de inferência (distribuição de scores, taxa de positivos por threshold, taxa de erro de validação) sem PII (`logs/online_metrics.jsonl` + eventos agregados `2xx/4xx/5xx/422`)
 - [x] Implementar rotina de avaliação pós-fato (quando labels `t+1` chegam) para medir Recall/PR-AUC em produção (mesmo que simulado) (`python -m src.offline_evaluation`)
 - [x] Definir política de retenção/limpeza de logs e artefatos locais (script simples + documentação) (`python -m src.retention`)
-- [ ] Implementar teste de não-regressão do modelo com limiares mínimos de métricas (ex.: Recall e/ou PR-AUC)
+- [x] Implementar teste de não-regressão do modelo com limiares mínimos de métricas (ex.: Recall e/ou PR-AUC) (`python -m src.regression_check` + `tests/test_model_regression.py`)
 - [ ] Configurar logging estruturado
 - [ ] Aplicar política de privacidade operacional (não logar identificadores sensíveis como `RA` em API e monitoramento)
 - [ ] Implementar relatório de drift com Evidently
