@@ -2331,9 +2331,9 @@
   "metadata": {
     "contract_version": "1.0.0",
     "rows_expected": 1156,
-    "dataset_basename": "BASE DE DADOS PEDE 2024 - DATATHON.xlsx",
+    "dataset_basename": null,
     "dataset_sha256": null,
-    "generated_at": "2026-02-14T18:38:49.861268+00:00",
+    "generated_at": "2026-02-23T05:39:08.553291+00:00",
     "notes": "Presence diferencia colunas originais do ano e colunas estruturais do alinhamento."
   }
 }
