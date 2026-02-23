@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime, timezone
@@ -74,6 +75,9 @@ class YearContract:
 
 CONTRACT_VERSION = "1.0.0"
 SUPPORTED_YEARS: tuple[int, ...] = (2022, 2023, 2024)
+CONTRACT_CHANGELOG_SCHEMA_VERSION = "1.0.0"
+CONTRACT_CHANGELOG_JSON_FILENAME = "contracts_changelog.json"
+CONTRACT_CHANGELOG_MD_FILENAME = "CHANGELOG.md"
 
 ROWS_EXPECTED_BY_YEAR: dict[int, int] = {
     2022: 860,
@@ -679,6 +683,333 @@ def _to_jsonable(value: Any) -> Any:
     return value
 
 
+def _read_json_if_exists(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _deepcopy_jsonable(value: Any) -> Any:
+    return copy.deepcopy(value)
+
+
+def _normalize_contract_payload_for_schema_diff(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = _deepcopy_jsonable(payload)
+    metadata = normalized.get("metadata")
+    if isinstance(metadata, dict):
+        metadata.pop("generated_at", None)
+        metadata.pop("dataset_basename", None)
+        metadata.pop("dataset_sha256", None)
+    return normalized
+
+
+def _stable_json_dumps(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _schema_sha256(payload: dict[str, Any]) -> str:
+    normalized = _normalize_contract_payload_for_schema_diff(payload)
+    return hashlib.sha256(_stable_json_dumps(normalized).encode("utf-8")).hexdigest()
+
+
+def _lineage_metadata(payload: dict[str, Any] | None) -> dict[str, Any]:
+    metadata = payload.get("metadata") if isinstance(payload, dict) else None
+    if not isinstance(metadata, dict):
+        return {"dataset_basename": None, "dataset_sha256": None}
+    return {
+        "dataset_basename": metadata.get("dataset_basename"),
+        "dataset_sha256": metadata.get("dataset_sha256"),
+    }
+
+
+def _column_rules_signature(column_payload: dict[str, Any]) -> str:
+    return _stable_json_dumps(column_payload.get("rules") or [])
+
+
+def _diff_contract_payloads(
+    previous: dict[str, Any] | None,
+    current: dict[str, Any],
+) -> dict[str, Any]:
+    current_columns = current.get("columns")
+    if not isinstance(current_columns, dict):
+        current_columns = {}
+
+    current_schema_sha = _schema_sha256(current)
+    current_lineage = _lineage_metadata(current)
+
+    if previous is None:
+        return {
+            "change_kind": "created",
+            "columns_count": len(current_columns),
+            "columns_added": sorted(current_columns),
+            "columns_removed": [],
+            "dtype_changed": [],
+            "presence_changed": [],
+            "pii_changed": [],
+            "rules_changed": [],
+            "rules_changed_count": 0,
+            "schema_changed": True,
+            "schema_sha256": current_schema_sha,
+            "previous_schema_sha256": None,
+            "lineage_changed": True,
+            "lineage": current_lineage,
+            "previous_lineage": {"dataset_basename": None, "dataset_sha256": None},
+        }
+
+    previous_columns = previous.get("columns")
+    if not isinstance(previous_columns, dict):
+        previous_columns = {}
+
+    previous_schema_sha = _schema_sha256(previous)
+    previous_lineage = _lineage_metadata(previous)
+
+    current_names = set(current_columns)
+    previous_names = set(previous_columns)
+    shared_names = sorted(current_names & previous_names)
+
+    dtype_changed: list[str] = []
+    presence_changed: list[str] = []
+    pii_changed: list[str] = []
+    rules_changed: list[str] = []
+
+    for column in shared_names:
+        prev_col = previous_columns.get(column)
+        curr_col = current_columns.get(column)
+        if not isinstance(prev_col, dict) or not isinstance(curr_col, dict):
+            rules_changed.append(column)
+            continue
+
+        if prev_col.get("dtype") != curr_col.get("dtype"):
+            dtype_changed.append(column)
+        if prev_col.get("presence") != curr_col.get("presence"):
+            presence_changed.append(column)
+        if bool(prev_col.get("pii")) != bool(curr_col.get("pii")):
+            pii_changed.append(column)
+        if _column_rules_signature(prev_col) != _column_rules_signature(curr_col):
+            rules_changed.append(column)
+
+    schema_changed = previous_schema_sha != current_schema_sha
+    lineage_changed = previous_lineage != current_lineage
+
+    if schema_changed:
+        change_kind = "updated"
+    elif lineage_changed:
+        change_kind = "lineage_only"
+    else:
+        change_kind = "unchanged"
+
+    return {
+        "change_kind": change_kind,
+        "columns_count": len(current_columns),
+        "columns_added": sorted(current_names - previous_names),
+        "columns_removed": sorted(previous_names - current_names),
+        "dtype_changed": dtype_changed,
+        "presence_changed": presence_changed,
+        "pii_changed": pii_changed,
+        "rules_changed": rules_changed,
+        "rules_changed_count": len(rules_changed),
+        "schema_changed": schema_changed,
+        "schema_sha256": current_schema_sha,
+        "previous_schema_sha256": previous_schema_sha,
+        "lineage_changed": lineage_changed,
+        "lineage": current_lineage,
+        "previous_lineage": previous_lineage,
+    }
+
+
+def _load_contracts_changelog(output_dir: Path) -> dict[str, Any]:
+    path = output_dir / CONTRACT_CHANGELOG_JSON_FILENAME
+    payload = _read_json_if_exists(path)
+    if not isinstance(payload, dict):
+        return {
+            "schema_version": CONTRACT_CHANGELOG_SCHEMA_VERSION,
+            "entries": [],
+        }
+    entries = payload.get("entries")
+    if not isinstance(entries, list):
+        entries = []
+    schema_version = payload.get("schema_version") or CONTRACT_CHANGELOG_SCHEMA_VERSION
+    return {
+        "schema_version": str(schema_version),
+        "entries": entries,
+    }
+
+
+def _build_contracts_changelog_entry(
+    *,
+    generated_at: str,
+    previous_by_year: dict[int, dict[str, Any] | None],
+    current_by_year: dict[int, dict[str, Any]],
+) -> dict[str, Any]:
+    changes_by_year: dict[str, Any] = {}
+    created_years: list[int] = []
+    updated_years: list[int] = []
+    lineage_only_years: list[int] = []
+    unchanged_years: list[int] = []
+
+    for year in SUPPORTED_YEARS:
+        diff = _diff_contract_payloads(previous_by_year.get(year), current_by_year[year])
+        changes_by_year[str(year)] = diff
+        kind = diff["change_kind"]
+        if kind == "created":
+            created_years.append(year)
+        elif kind == "updated":
+            updated_years.append(year)
+        elif kind == "lineage_only":
+            lineage_only_years.append(year)
+        else:
+            unchanged_years.append(year)
+
+    changed_years = created_years + updated_years + lineage_only_years
+    total_structural_changes = sum(
+        1
+        for year in SUPPORTED_YEARS
+        if changes_by_year[str(year)]["schema_changed"]
+    )
+
+    sample_year = current_by_year[SUPPORTED_YEARS[0]]
+    sample_metadata = sample_year.get("metadata") if isinstance(sample_year, dict) else {}
+    if not isinstance(sample_metadata, dict):
+        sample_metadata = {}
+
+    notes: list[str] = []
+    if all(previous_by_year.get(year) is not None for year in SUPPORTED_YEARS):
+        notes.append("comparison_against_existing_contract_files")
+    else:
+        notes.append("initial_contract_export_or_missing_baseline")
+
+    return {
+        "generated_at": generated_at,
+        "contract_version_declared": sample_metadata.get("contract_version"),
+        "dataset_basename": sample_metadata.get("dataset_basename"),
+        "dataset_sha256": sample_metadata.get("dataset_sha256"),
+        "changes_by_year": changes_by_year,
+        "summary": {
+            "created_years": created_years,
+            "updated_years": updated_years,
+            "lineage_only_years": lineage_only_years,
+            "unchanged_years": unchanged_years,
+            "changed_years": changed_years,
+            "total_structural_changes": total_structural_changes,
+        },
+        "notes": notes,
+    }
+
+
+def _changelog_entry_has_meaningful_change(entry: dict[str, Any]) -> bool:
+    summary = entry.get("summary")
+    if not isinstance(summary, dict):
+        return True
+    for key in ("created_years", "updated_years", "lineage_only_years"):
+        value = summary.get(key)
+        if isinstance(value, list) and len(value) > 0:
+            return True
+    return False
+
+
+def _build_contracts_changelog_markdown(changelog: dict[str, Any]) -> str:
+    entries = changelog.get("entries")
+    entries_list = entries if isinstance(entries, list) else []
+
+    lines: list[str] = []
+    lines.append("# Changelog dos Data Contracts")
+    lines.append("")
+    lines.append(
+        "Histórico agregado das mudanças dos contratos exportados em `docs/contracts/`."
+    )
+    lines.append(
+        "Diferenças estruturais ignoram metadados voláteis como `generated_at`."
+    )
+    lines.append("")
+
+    if not entries_list:
+        lines.append("_Sem entradas registradas ainda._")
+        return "\n".join(lines).strip() + "\n"
+
+    for idx, entry_raw in enumerate(reversed(entries_list), start=1):
+        entry = entry_raw if isinstance(entry_raw, dict) else {}
+        generated_at = entry.get("generated_at", "unknown")
+        declared_version = entry.get("contract_version_declared", "unknown")
+        summary = entry.get("summary")
+        summary = summary if isinstance(summary, dict) else {}
+        lines.append(f"## Entrada {idx} - {generated_at}")
+        lines.append("")
+        lines.append(f"- `contract_version_declared`: `{declared_version}`")
+        if entry.get("dataset_basename") is not None:
+            lines.append(f"- `dataset_basename`: `{entry.get('dataset_basename')}`")
+        if entry.get("dataset_sha256") is not None:
+            lines.append(f"- `dataset_sha256`: `{entry.get('dataset_sha256')}`")
+        lines.append(
+            f"- `changed_years`: `{summary.get('changed_years', [])}` | "
+            f"`structural_changes`: `{summary.get('total_structural_changes', 0)}`"
+        )
+        lines.append("")
+        lines.append("| Ano | Tipo | Colunas | Adds | Removes | dtype | presence | pii | rules |")
+        lines.append("|---|---|---:|---:|---:|---:|---:|---:|---:|")
+
+        changes_by_year = entry.get("changes_by_year")
+        changes_by_year = changes_by_year if isinstance(changes_by_year, dict) else {}
+        for year in SUPPORTED_YEARS:
+            diff = changes_by_year.get(str(year))
+            diff = diff if isinstance(diff, dict) else {}
+            lines.append(
+                "| "
+                f"{year} | {diff.get('change_kind', 'unknown')} | "
+                f"{int(diff.get('columns_count', 0) or 0)} | "
+                f"{len(diff.get('columns_added', []) or [])} | "
+                f"{len(diff.get('columns_removed', []) or [])} | "
+                f"{len(diff.get('dtype_changed', []) or [])} | "
+                f"{len(diff.get('presence_changed', []) or [])} | "
+                f"{len(diff.get('pii_changed', []) or [])} | "
+                f"{int(diff.get('rules_changed_count', 0) or 0)} |"
+            )
+        lines.append("")
+
+    return "\n".join(lines).strip() + "\n"
+
+
+def _write_contracts_changelog(
+    *,
+    output_dir: Path,
+    generated_at: str,
+    previous_by_year: dict[int, dict[str, Any] | None],
+    current_by_year: dict[int, dict[str, Any]],
+) -> None:
+    changelog = _load_contracts_changelog(output_dir)
+    entries = changelog.get("entries")
+    entries_list = entries if isinstance(entries, list) else []
+
+    entry = _build_contracts_changelog_entry(
+        generated_at=generated_at,
+        previous_by_year=previous_by_year,
+        current_by_year=current_by_year,
+    )
+
+    changelog_path = output_dir / CONTRACT_CHANGELOG_JSON_FILENAME
+    markdown_path = output_dir / CONTRACT_CHANGELOG_MD_FILENAME
+
+    if not entries_list or _changelog_entry_has_meaningful_change(entry):
+        entries_list.append(entry)
+        changelog["entries"] = entries_list
+        changelog["schema_version"] = CONTRACT_CHANGELOG_SCHEMA_VERSION
+        changelog_path.write_text(
+            json.dumps(changelog, ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+    elif not changelog_path.exists():
+        changelog["entries"] = entries_list
+        changelog["schema_version"] = CONTRACT_CHANGELOG_SCHEMA_VERSION
+        changelog_path.write_text(
+            json.dumps(changelog, ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+
+    markdown_path.write_text(
+        _build_contracts_changelog_markdown(changelog),
+        encoding="utf-8",
+    )
+
+
 def _build_markdown(contract: YearContract) -> str:
     lines: list[str] = []
     lines.append(f"# Data Contract {contract.year}")
@@ -704,11 +1035,18 @@ def export_contracts(
     dataset_basename: str | None = None,
     dataset_sha256: str | None = None,
     write_markdown: bool = True,
+    write_changelog: bool = True,
 ) -> None:
     """Export yearly data contracts into versioned JSON files."""
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     generated_at = datetime.now(timezone.utc).isoformat()
+    previous_by_year: dict[int, dict[str, Any] | None] = {}
+    current_by_year: dict[int, dict[str, Any]] = {}
+
+    for year in SUPPORTED_YEARS:
+        json_file = output_path / f"data_contract_{year}.json"
+        previous_by_year[year] = _read_json_if_exists(json_file)
 
     for year in SUPPORTED_YEARS:
         contract = get_year_contract(year)
@@ -717,6 +1055,7 @@ def export_contracts(
         contract.metadata["dataset_sha256"] = dataset_sha256
 
         json_payload = _to_jsonable(contract)
+        current_by_year[year] = json_payload
         json_file = output_path / f"data_contract_{year}.json"
         json_file.write_text(
             json.dumps(json_payload, ensure_ascii=False, indent=2),
@@ -726,6 +1065,14 @@ def export_contracts(
         if write_markdown:
             md_file = output_path / f"data_contract_{year}.md"
             md_file.write_text(_build_markdown(contract), encoding="utf-8")
+
+    if write_changelog:
+        _write_contracts_changelog(
+            output_dir=output_path,
+            generated_at=generated_at,
+            previous_by_year=previous_by_year,
+            current_by_year=current_by_year,
+        )
 
 
 def _parse_args() -> argparse.Namespace:
@@ -758,6 +1105,11 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Export JSON only.",
     )
+    parser.add_argument(
+        "--no-changelog",
+        action="store_true",
+        help="Disable contracts changelog generation in docs/contracts.",
+    )
     return parser.parse_args()
 
 
@@ -769,6 +1121,7 @@ def main() -> None:
             dataset_basename=args.dataset_basename,
             dataset_sha256=args.dataset_sha256,
             write_markdown=not args.no_markdown,
+            write_changelog=not args.no_changelog,
         )
 
 

@@ -1,7 +1,9 @@
+import json
 from pathlib import Path
 
 import pytest
 
+import src.contracts as contracts_mod
 from src.contracts import (
     Enforcement,
     Presence,
@@ -85,6 +87,63 @@ def test_export_contracts_writes_json_with_metadata(tmp_path: Path) -> None:
         assert '"generated_at"' in content
         assert '"dataset_basename": "BASE DE DADOS PEDE 2024 - DATATHON.xlsx"' in content
         assert '"dataset_sha256": "abc123"' in content
+
+    changelog_json = tmp_path / "contracts_changelog.json"
+    changelog_md = tmp_path / "CHANGELOG.md"
+    assert changelog_json.exists()
+    assert changelog_md.exists()
+
+    changelog_payload = json.loads(changelog_json.read_text(encoding="utf-8"))
+    assert changelog_payload["schema_version"] == "1.0.0"
+    assert len(changelog_payload["entries"]) == 1
+    entry = changelog_payload["entries"][0]
+    assert entry["summary"]["created_years"] == [2022, 2023, 2024]
+    assert entry["summary"]["updated_years"] == []
+    assert entry["changes_by_year"]["2024"]["columns_count"] > 0
+    assert entry["changes_by_year"]["2024"]["schema_sha256"]
+
+
+def test_export_contracts_changelog_is_idempotent_when_only_generated_at_changes(
+    tmp_path: Path,
+) -> None:
+    export_contracts(output_dir=tmp_path)
+    export_contracts(output_dir=tmp_path)
+
+    changelog_payload = json.loads(
+        (tmp_path / "contracts_changelog.json").read_text(encoding="utf-8")
+    )
+    assert len(changelog_payload["entries"]) == 1
+    entry = changelog_payload["entries"][0]
+    assert entry["summary"]["created_years"] == [2022, 2023, 2024]
+
+
+def test_export_contracts_changelog_appends_entry_on_structural_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    export_contracts(output_dir=tmp_path)
+
+    original_get_year_contract = contracts_mod.get_year_contract
+
+    def _patched_get_year_contract(year: int):
+        contract = original_get_year_contract(year)
+        if year == 2024:
+            contract.columns["Idade"].dtype = "Float64"
+        return contract
+
+    monkeypatch.setattr(contracts_mod, "get_year_contract", _patched_get_year_contract)
+
+    export_contracts(output_dir=tmp_path)
+
+    changelog_payload = json.loads(
+        (tmp_path / "contracts_changelog.json").read_text(encoding="utf-8")
+    )
+    assert len(changelog_payload["entries"]) == 2
+    latest = changelog_payload["entries"][-1]
+    assert latest["summary"]["updated_years"] == [2024]
+    assert latest["summary"]["created_years"] == []
+    assert "Idade" in latest["changes_by_year"]["2024"]["dtype_changed"]
+    assert latest["changes_by_year"]["2024"]["change_kind"] == "updated"
 
 
 def test_get_year_contract_rejects_invalid_year() -> None:

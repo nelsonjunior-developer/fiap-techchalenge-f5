@@ -50,6 +50,9 @@ Do ponto de vista de sistema, este problema também é adequado para produção 
 - O rótulo (`Defasagem_{t+1}`) chega com atraso, o que é compatível com estratégia de mensuração offline (pós-fato) e monitoramento online via drift/distribuição de scores.
 - O pipeline permite retreinamento periódico conforme novos dados anuais/semestrais entram, mantendo o modelo atualizado para mudanças de população e de processo.
 
+<details>
+<summary>Alternativas consideradas e por que não adotamos como escopo principal (expandir)</summary>
+
 #### Alternativas consideradas e por que não adotamos como escopo principal
 
 **1) Clusterização (segmentação de perfis de alunos)**  
@@ -64,7 +67,48 @@ Prever evasão escolar seria altamente relevante para retenção e planejamento 
 **4) Prever melhora/piora de defasagem (delta de defasagem entre anos)**  
 Modelar a variação (melhora/piora) da defasagem poderia apoiar identificação de trajetórias e eficácia de intervenções. Não adotamos como escopo principal porque a formulação depende de escolhas adicionais (regra do delta, discretização, classes e interpretação) e pode ser mais sensível a ruído e mudanças de medição entre anos. Para esta entrega, preferimos um target mais direto e acionável (“estar defasado em t+1”) com decisão de risco clara e prioridade em Recall. A previsão de delta pode ser explorada como extensão, reaproveitando o pareamento temporal já implementado.
 
+</details>
+
 O modelo continua com caráter preditivo de apoio à decisão humana: não é causal nem prescritivo. O foco de engenharia deste projeto é o sistema de ML em produção, incluindo entrada de alunos novos, validação por contrato, inferência, mensuração em produção, monitoramento de drift, retreinamento e promoção/rollback de versões.
+
+## Como Navegar Este README
+
+- Leitura rápida (banca/gestão): `Visão Geral`, `Target`, `Stack Tecnológica`, `Etapas do Pipeline`, `CI` e `Checklist`.
+- Leitura técnica (engenharia/ML): `Dados e Ingestão`, `Data Contract`, `Etapas do Pipeline` e os blocos detalhados (Fases 4 a 7), que estão em seções colapsáveis.
+- Operação local: `Ambiente Local (.venv)`, `Rodar API Local`, `Docker`, `Drift (Evidently)` e `Dashboard de Drift (Streamlit)`.
+
+<details>
+<summary>Sumário de navegação (expandir)</summary>
+
+- Fundamentos do problema:
+  - `Visão Geral e Objetivo de Negócio`
+  - `Definição do Target`
+  - `Análise das Bases e Dicionário`
+- Dados, contratos e pipeline:
+  - `Dados e Ingestão`
+  - `Validação de Consistência`
+  - `Coorte e Interseção por RA`
+  - `Data Contract`
+  - `Stack Tecnológica`
+  - `Etapas do Pipeline de Machine Learning`
+- Setup e execução:
+  - `Estrutura do Projeto`
+  - `Ambiente Local (.venv)`
+  - `Rodar API Local`
+  - `Docker (Deploy Local)`
+- Monitoramento e operação:
+  - `Mensuração em Produção (Ground Truth Delay)`
+  - `Retenção e Limpeza Local`
+  - `Não-regressão do Modelo`
+  - `Logging Estruturado`
+  - `Privacidade Operacional`
+  - `Drift (Evidently)`
+  - `Dashboard de Drift (Streamlit)`
+  - `CI (GitHub Actions)`
+- Governança de execução:
+  - `Checklist do Projeto - Datathon Machine Learning Engineering`
+
+</details>
 
 ## Definição do Target
 
@@ -205,6 +249,12 @@ Resumo atual do dataset:
 python -m src.contracts --export
 ```
 
+- O export agora também mantém um changelog dos contratos em `docs/contracts/`:
+  - `docs/contracts/contracts_changelog.json` (resumo machine-readable de mudanças por ano)
+  - `docs/contracts/CHANGELOG.md` (resumo humano)
+- O diff estrutural do changelog ignora metadados voláteis como `generated_at` para evitar ruído.
+- Use `--no-changelog` apenas se quiser exportar os contratos sem atualizar esse histórico (ex.: debug/local).
+
 ## Stack Tecnológica
 
 ### 1) Linguagem e runtime
@@ -282,6 +332,140 @@ python -m src.contracts --export
 - Campos sensíveis como `RA`, `Nome_Anon` e `Avaliador1..Avaliador6` não são usados como features do modelo.
 - Logs e monitoramento em produção/local usam apenas agregados (contagens, taxas e histogramas), sem payload raw, sem listas de IDs e sem probabilidades individuais por aluno.
 - O monitoramento de drift opera sobre `MODEL frame` (sem PII), e os guardrails de privacidade/redaction estão centralizados no código (`src/privacy.py` + `src/utils.py`).
+
+## Etapas do Pipeline de Machine Learning
+
+Esta seção consolida o fluxo ponta a ponta do pipeline de ML (treino, avaliação, seleção, promoção e geração de referência de drift). O objetivo é conectar as peças já documentadas ao longo do README em um único mapa operacional.
+
+### 1) Visão geral do fluxo (offline + artefatos)
+
+```text
+XLSX (PEDE2022/2023/2024)
+  -> ingestão + harmonização + tipagem + normalização (RAW frame por ano)
+  -> validação de qualidade + data contracts
+  -> coorte temporal por RA + target t->t+1 (X_raw(t), y(t+1))
+  -> anti-leakage + feature pruning
+  -> RAW -> MODEL frame (transformer serializável)
+  -> pré-processamento (imputação + one-hot + escalonamento opcional)
+  -> treino (baseline + não-linear)
+  -> avaliação holdout temporal + comparação
+  -> seleção do campeão + threshold operacional
+  -> versionamento/promoção (model.joblib + metadata.json)
+  -> build_reference_data (referência de drift em app/model/reference)
+```
+
+### 2) Nomenclatura dos dados ao longo do pipeline
+
+- `RAW frame`: dataframe harmonizado/alinhado por ano (após ingestão e padronização de schema/tipos).
+- `X_raw`: features cruas do ano `t` (sem colunas futuras, antes do pré-processamento sklearn).
+- `y`: target binário derivado de `Defasagem_{t+1}` (`1` se `< 0`, senão `0`).
+- `MODEL frame`: saída do transformer `RAW -> MODEL` (features tabulares preparadas para o preprocessor/modelo, sem PII/leakage).
+- `X_preprocessed`: matriz após `ColumnTransformer` (imputação + codificação categórica + escalonamento opcional).
+- `Inference output`: `risk_proba`, `risk_class`, `threshold_applied`, `model_version` (contrato da API).
+
+### 3) Etapas detalhadas (objetivo, módulos e saídas)
+
+| Etapa | Objetivo | Módulos principais | Entradas | Saídas / artefatos |
+|---|---|---|---|---|
+| Ingestão e harmonização | Ler XLSX, padronizar headers, tipos e categorias entre anos | `src.data`, `src.schema`, `src.dtypes`, `src.categories`, `src.column_mapping` | `dataset/*.xlsx` | dataframes harmonizados por ano (`2022/2023/2024`) |
+| Contratos e qualidade | Validar schema/tipos/missing/domínio com contratos versionados | `src.contracts`, `src.contract_validate`, `src.validate` | RAW frames + `docs/contracts/*` | `artifacts/data_quality_report.json/.md`, logs agregados |
+| Coorte temporal e target | Construir pares `t -> t+1` com interseção de `RA` e target futuro | `src.data`, `src.cohort_stats` | frames por ano | pares temporais, `y`, estatísticas de coorte (`artifacts/ra_intersections.json/.md`) |
+| Anti-leakage e pruning | Garantir que `X` use apenas variáveis de `t`; remover colunas inválidas/irrelevantes | `src.leakage`, `src.feature_pruning` | `X_raw` | `X_raw` seguro (sem leakage) + plano de pruning |
+| Feature engineering (RAW -> MODEL) | Transformar features cruas em `MODEL frame` reusável em treino/inferência | `src.features`, `src.pipeline_components` | `X_raw` | `MODEL frame` com colunas estáveis esperadas |
+| Pré-processamento sklearn | Imputar missing e codificar/transformar features para treino | `src.preprocessing`, `src.imputation` | `MODEL frame` | `X_preprocessed` + `ColumnTransformer` serializável |
+| Treino e comparação | Treinar candidatos (baseline e não-linear) e comparar métricas | `src.train_baseline`, `src.train_hgb`, `src.compare_models` | treino `X(2022) -> y(2023)` | modelos candidatos + métricas + `artifacts/model_selection.json` |
+| Avaliação temporal | Avaliar holdout `2023 -> 2024` e medir desempenho realista no tempo | `src.evaluate_holdout`, `src.temporal_shift`, `src.metrics` | modelo + holdout temporal | métricas (Recall/PR-AUC/etc), matriz de confusão, relatórios de shift |
+| Seleção e gates | Aplicar critério objetivo (Recall primário + PR-AUC mínimo) e checar não-regressão | `src.model_selection`, `src.promotion_policy`, `src.regression_check` | metadados/relatórios dos candidatos | campeão + status `PASS/WARNING/FAIL` dos gates |
+| Versionamento e promoção | Persistir release, promover para serving e manter rollback | `src.model_versioning`, `src.promote_model` | `model.joblib` + `metadata.json` do campeão | `artifacts/models/releases/*`, `app/model/model.joblib`, `app/model/metadata.json`, manifests |
+| Referência para drift | Construir dataset de referência no `MODEL frame` do modelo promovido | `src.build_reference_data` | modelo promovido + dataset | `app/model/reference/reference_model_frame.csv` + `reference_meta.json` |
+
+### 4) Sequência prática de execução (runbook resumido)
+
+Observação: o diretório `dataset/` não é versionado no Git. Os comandos abaixo assumem o XLSX disponível localmente.
+
+1. Validar qualidade e contratos dos dados:
+
+```bash
+python -m src.validate
+```
+
+2. Gerar estatísticas de coorte temporal por `RA`:
+
+```bash
+python -m src.cohort_stats
+```
+
+3. Treinar candidatos (baseline e HGB) e avaliar holdout:
+
+```bash
+python -m src.train_baseline
+python -m src.train_hgb
+python -m src.compare_models
+python -m src.evaluate_holdout
+```
+
+4. Selecionar/prometer campeão e preparar serving:
+
+```bash
+python -m src.promote_model
+```
+
+5. Gerar referência para drift (após promoção):
+
+```bash
+python -m src.build_reference_data
+```
+
+6. (Opcional) Rodar checks complementares:
+
+```bash
+python -m src.regression_check
+python -m src.temporal_shift
+```
+
+### 5) Artefatos gerados ao longo do pipeline (visão consolidada)
+
+- Contratos e governança de dados:
+  - `docs/contracts/data_contract_*.json/.md`
+  - `docs/contracts/contracts_changelog.json`
+  - `docs/contracts/CHANGELOG.md`
+- Qualidade e coorte:
+  - `artifacts/data_quality_report.json/.md`
+  - `artifacts/ra_intersections.json/.md`
+- Seleção/avaliação:
+  - `artifacts/model_selection.json`
+  - relatórios de holdout/shift em `artifacts/*`
+- Versionamento de modelo:
+  - `artifacts/models/releases/<model_version>/`
+  - manifests de staging/promoção (`staging_manifest.json`, `promoted_model.json`, `release.json`)
+- Serving:
+  - `app/model/model.joblib`
+  - `app/model/metadata.json`
+- Drift (referência):
+  - `app/model/reference/reference_model_frame.csv`
+  - `app/model/reference/reference_meta.json`
+
+### 6) Guardrails e decisões de desenho do pipeline
+
+- Split temporal (não aleatório):
+  - treino oficial `X(2022) -> y(2023)` e holdout final `X(2023) -> y(2024)` para refletir cenário real de produção.
+- Anti-leakage:
+  - `X` usa somente dados de `t`; `y` é derivado exclusivamente de `t+1`.
+  - `RA` é usado para pareamento/auditoria de coorte, nunca como feature.
+- Métrica de negócio priorizada:
+  - `Recall` é a métrica primária (custo maior para falsos negativos), com `PR-AUC` como secundária para controlar trade-off.
+- Reuso treino/inferência:
+  - o caminho `RAW -> MODEL` e o pré-processamento são serializáveis e reutilizados pela API para manter consistência.
+- Observabilidade e privacidade:
+  - monitoramento online usa logs agregados (scores em histograma, taxas) e o monitoramento pós-fato é separado por causa do `ground truth delay`.
+  - sem payload raw, sem IDs/`RA`, sem probabilidades individuais nos logs.
+
+### 7) Relação com as seções específicas do README
+
+- Detalhes de contratos de dados: ver **Data Contract**
+- API/serving e payloads: ver seções de **API** / endpoints (`/predict`, `/health`, `/version`)
+- Drift e dashboard: ver **Drift (Evidently)** e **Dashboard de Drift (Streamlit)**
+- Retenção e limpeza local: ver **Retenção e Limpeza Local**
 
 ## 📁 Estrutura do Projeto
 
@@ -476,7 +660,14 @@ Sem sklearn: roda apenas `RawToModelFrameTransformer` e valida o caminho `RAW ->
   - Não logar `RA`, listas de identificadores, payloads completos ou dados pessoais.
   - Logar apenas métricas agregadas e contadores operacionais.
 
-## Separação de Features (Fase 4)
+## Deep Dives Técnicos (Fases 4 a 7)
+
+As seções abaixo concentram detalhamento técnico de implementação. Para leitura executiva/técnica rápida, priorize as seções `Stack Tecnológica`, `Etapas do Pipeline de Machine Learning` e os resumos operacionais.
+
+<details>
+<summary>Detalhamento técnico das Fases 4 a 6 (feature engineering, treino, artefatos, API e deploy) — expandir</summary>
+
+### Separação de Features (Fase 4)
 
 - A seleção de features exclui PII por padrão a partir de `PII_COLUMNS` do contrato (`Nome_Anon` e `Avaliador*`), sem depender de listas duplicadas.
 - As features são separadas por dtypes em três grupos: `numeric`, `categorical` e `datetime` (com `Data_Nasc` tratada explicitamente como datetime nesta etapa).
@@ -484,7 +675,7 @@ Sem sklearn: roda apenas `RawToModelFrameTransformer` e valida o caminho `RAW ->
   - `make_temporal_pairs(..., persist_feature_split=True)` gera `artifacts/feature_split_report.json`.
   - por padrão (`persist_feature_split=False`), não há side effect de escrita em disco.
 
-## Imputação de Missing (Fase 4)
+### Imputação de Missing (Fase 4)
 
 - A política de imputação é definida como plano auditável em `src/imputation.py`, para uso dentro de `Pipeline/ColumnTransformer` na etapa de treino.
 - Estratégias padrão:
@@ -496,7 +687,7 @@ Sem sklearn: roda apenas `RawToModelFrameTransformer` e valida o caminho `RAW ->
 - Evidência local:
   - `artifacts/imputation_plan.json` (gerado por `persist_imputation_plan(...)`).
 
-## Codificação Categórica (Fase 4)
+### Codificação Categórica (Fase 4)
 
 - A codificação categórica é feita com `OneHotEncoder(handle_unknown="ignore")` para tolerar categorias novas em produção sem quebrar inferência.
 - O bloco categórico é aplicado após imputação (`SimpleImputer(strategy="most_frequent", add_indicator=True)`), dentro de `ColumnTransformer` em `src/preprocessing.py`.
@@ -504,7 +695,7 @@ Sem sklearn: roda apenas `RawToModelFrameTransformer` e valida o caminho `RAW ->
 - `Fase` e `Fase_Ideal` permanecem categóricas nesta etapa.
 - `Data_Nasc` (datetime) não entra na codificação nesta fase; fica para feature engineering posterior.
 
-## Escalonamento Numérico (Fase 4)
+### Escalonamento Numérico (Fase 4)
 
 - O pré-processador agora suporta escalonamento numérico configurável em `src/preprocessing.py`.
 - Regra adotada:
@@ -512,7 +703,7 @@ Sem sklearn: roda apenas `RawToModelFrameTransformer` e valida o caminho `RAW ->
   - modelos de árvore (ex.: `HistGradientBoosting`): usar `numeric_scaler="none"` (preset `DEFAULT_SCALER_FOR_TREE`).
 - O escalonador pode ser configurado entre `standard`, `robust` e `none`, com validação explícita de parâmetro.
 
-## Reuso do Pré-processamento na Inferência (Fase 4)
+### Reuso do Pré-processamento na Inferência (Fase 4)
 
 - O contrato de entrada para inferência é exposto por `get_expected_raw_feature_columns()` e deriva diretamente de `get_feature_columns_for_model()` (fonte única de verdade).
 - `validate_inference_frame(...)` valida:
@@ -526,7 +717,7 @@ Sem sklearn: roda apenas `RawToModelFrameTransformer` e valida o caminho `RAW ->
   - `transform_raw_to_model_frame(...)` para aplicar feature engineering internamente antes do `ColumnTransformer`.
 - O contrato da API valida somente colunas raw; as features derivadas são detalhe interno do pipeline.
 
-## Feature Engineering (Fase 4)
+### Feature Engineering (Fase 4)
 
 - Features derivadas simples e anti-leakage (somente dados de `t`) são criadas em `src/features.py` por `add_engineered_features(...)`.
 - Numéricas:
@@ -537,7 +728,7 @@ Sem sklearn: roda apenas `RawToModelFrameTransformer` e valida o caminho `RAW ->
   - `age_bucket` (`07_10`, `11_14`, `15_18`, `19_plus`)
 - A engenharia é opt-in no bundle (`enable_feature_engineering=True/False`) e pode incluir/excluir `age_bucket` (`enable_age_bucket`).
 
-## Gate Anti-Leakage (Fase 4)
+### Gate Anti-Leakage (Fase 4)
 
 - A validação explícita de leakage fica em `src/leakage.py` com `assert_no_leakage(...)`.
 - O gate roda em três pontos:
@@ -546,7 +737,7 @@ Sem sklearn: roda apenas `RawToModelFrameTransformer` e valida o caminho `RAW ->
   - transformação para model frame (`transform_raw_to_model_frame`) no contexto `MODEL`, antes do `ColumnTransformer`.
 - Colunas suspeitas e 100% ausentes (artefato estrutural de alinhamento) são toleradas apenas quando não têm sinal (`n_non_null = 0`) e podem ser removidas no fluxo de treino, mantendo logs apenas agregados por nome de coluna.
 
-## Feature Pruning (Fase 4)
+### Feature Pruning (Fase 4)
 
 - A remoção de colunas irrelevantes/leakage é feita por plano determinístico em `src/feature_pruning.py`.
 - O plano (`compute_feature_pruning_plan`) é calculado apenas no treino, após feature engineering.
@@ -559,70 +750,18 @@ Sem sklearn: roda apenas `RawToModelFrameTransformer` e valida o caminho `RAW ->
 - Na inferência, o plano é somente aplicado (`apply_feature_pruning_plan`) sem recalcular critérios no payload de produção.
 - Artefato local de auditoria: `artifacts/feature_pruning_report.json`.
 
-## Decisões de Feature Engineering (Fase 4)
+### Decisões de Feature Engineering (Fase 4)
 
-Esta fase consolida as decisões necessárias para transformar dados crus (já validados na Fase 3) em um model frame consistente e reutilizável em treino e inferência.
+Resumo (README):
+- princípios de desenho: consistência treino=inferência, anti-leakage e privacidade;
+- exclusão de PII (`RA`, `Nome_Anon`, `Avaliador*`) do model frame;
+- política de imputação/codificação/escalonamento;
+- regras de pruning e reaplicação na inferência.
 
-### 1) Princípios e escopo
-- Feature engineering ocorre após ingestão/qualidade (Fase 3) e antes do treinamento (Fase 5).
-- As mesmas transformações são reaplicáveis em inferência via `build_preprocessing_bundle(...)`.
-- O modelo é preditivo (não causal) e opera apenas com dados disponíveis em `t`.
+Detalhamento técnico completo (incluindo snapshots de split, regras e referências):
+- `docs/pipeline_ml_deep_dives.md` (seção `Decisões de Feature Engineering (Fase 4)`)
 
-### 2) Exclusões por privacidade e identificação
-- `RA` nunca é feature (somente ID/auditoria).
-- Colunas sensíveis (`PII_COLUMNS` em `src/contracts.py`) são excluídas do model frame, incluindo `Nome_Anon` e `Avaliador1..Avaliador6`.
-- `Nome_Anon` é tratado como sensível porque em 2022 pode representar nome real.
-
-### 3) Split numérico / categórico / datetime (canônico vs snapshot)
-- O preprocessor usa listas canônicas estáveis em `src/preprocessing.py`:
-  - `NUMERIC_COLS`: 18
-  - `CATEGORICAL_COLS`: 18
-  - `DATETIME_COLS`: 1
-- `Data_Nasc` é classificada como datetime, mas não entra no model frame nesta fase.
-
-Snapshots agregados do recorte temporal (após exclusão de PII e drops estruturais de leakage):
-- `2022->2023`: numeric=20, categorical=22, datetime=1, total_features no recorte=43, all_missing remanescente=6, leakage estrutural dropado=6 (`INDE 2023`, `INDE 2024`, `INDE 23`, `Pedra 2023`, `Pedra 2024`, `Pedra 23`).
-- `2023->2024`: numeric=22, categorical=24, datetime=1, total_features no recorte=47, all_missing=19, leakage estrutural dropado=2 (`INDE 2024`, `Pedra 2024`).
-
-### 4) Missing e imputação
-- Numéricas: `SimpleImputer(strategy="median", add_indicator=True)`.
-- Categóricas: `SimpleImputer(strategy="most_frequent", add_indicator=True)`.
-- `add_indicator=True` aumenta dimensionalidade após `fit`, comportamento esperado da pipeline.
-
-### 5) Codificação de categóricas
-- `OneHotEncoder(handle_unknown="ignore")` para robustez com categorias novas na inferência.
-- Compatibilidade de versão do sklearn é tratada em helper único (`sparse_output` vs `sparse`).
-
-### 6) Escalonamento numérico (quando necessário)
-- Baseline linear (`LogisticRegression`): `StandardScaler` (opção `RobustScaler`).
-- Modelo de árvore (`HistGradientBoostingClassifier`): sem scaling por padrão.
-
-### 7) Features derivadas (quando habilitadas)
-- `add_engineered_features(...)` aplica derivação determinística e NA-safe antes do `ColumnTransformer`.
-- Quando habilitadas, as novas colunas entram explicitamente no conjunto esperado do model frame.
-- Não há uso de informação futura nas features derivadas.
-
-### 8) Anti-leakage (RAW + MODEL/TRAIN)
-- `RAW`: bloqueio estrito de colunas extras future-like/target-like.
-- `MODEL/TRAIN`: tolera suspeitas 100% missing (ruído estrutural), mas falha se houver qualquer sinal não nulo.
-- Detecção semântica usa padrões específicos (`INDE/Pedra` + ano, sufixos `_t1`, `target`, etc.) sem regex genérica de ano.
-
-### 9) Pruning (fit no treino, apply na inferência)
-- Pruning remove colunas sem sinal/instáveis com regras configuráveis (all-missing, constante, alta cardinalidade, exclusões explícitas).
-- O plano é fitado no treino e somente aplicado na inferência.
-- Relatórios são agregados (nomes/contagens), sem valores de célula ou IDs.
-
-### 10) Reutilização em inferência
-- A API valida schema raw, aplica feature engineering interno (quando habilitado), aplica seleção/model frame e gate anti-leakage, depois transforma com o mesmo preprocessor do treino.
-- Isso garante consistência treino=inferência.
-
-Referências:
-- `src/preprocessing.py`
-- `src/leakage.py`
-- `src/contracts.py`
-- `src/features.py`
-
-## ColumnTransformer para Pré-processamento (Fase 5)
+### ColumnTransformer para Pré-processamento (Fase 5)
 
 - O núcleo do pré-processamento do modelo é um `ColumnTransformer`, construído por `build_preprocessing_bundle(...)` em `src/preprocessing.py`.
 - Pipeline numérico:
@@ -639,7 +778,7 @@ Referências:
   - baseline linear: usar `DEFAULT_SCALER_FOR_LINEAR = "standard"` explicitamente.
   - na fábrica da pipeline completa (`build_model_pipeline`), o default é `standard` para baseline linear; para árvore, usar `scaler_strategy="none"`.
 
-## Pipeline End-to-End (Fase 5)
+### Pipeline End-to-End (Fase 5)
 
 - A unidade de treino/inferência serializável é uma `Pipeline` sklearn completa:
   - `raw_to_model` (`RawToModelFrameTransformer`)
@@ -655,7 +794,7 @@ Referências:
 - A construção fica centralizada em `src/train_pipeline.py` (`build_model_pipeline(...)`), sem closures no transformer para garantir serialização via `joblib`.
 - Smoke oficial para esse fluxo: `python -m src.smoke_pipeline`.
 
-## Treino Baseline (Fase 5)
+### Treino Baseline (Fase 5)
 
 - CLI oficial para baseline:
   - `python -m src.train_baseline --year-t 2022 --year-t1 2023 --out-dir artifacts/models/baseline_logreg --scaler standard --variants none --enable-feature-engineering 1 --enable-age-bucket 1`
@@ -666,7 +805,7 @@ Referências:
   - evita drift de schema entre treino e producao;
   - mantem compatibilidade com o `ColumnTransformer` e com o contrato de colunas do modelo.
 
-## Treino Não-Linear (Fase 5)
+### Treino Não-Linear (Fase 5)
 
 - CLI oficial para modelo não-linear:
   - `python -m src.train_hgb --file-path <xlsx> --year-t 2022 --year-t1 2023 --out-dir artifacts/models/nonlinear_hgb --variants default,tuned --enable-feature-engineering 1 --enable-age-bucket 0`
@@ -678,7 +817,7 @@ Referências:
   - `artifacts/models/nonlinear_hgb/<variant>/model.joblib`
   - `artifacts/models/nonlinear_hgb/<variant>/metadata.json`
 
-## Estratégia de Decisão e Desbalanceamento (Fase 5)
+### Estratégia de Decisão e Desbalanceamento (Fase 5)
 
 - Prevalência observada no pipeline oficial:
   - treino `2022->2023`: `n=600`, `n_pos=366`, prevalência `0.6100`
@@ -705,7 +844,7 @@ Referências:
     - `class_imbalance_strategy` (prevalência, decisão, alternativas e evidências agregadas)
     - `prediction_policy` (config padrão consumível pela camada de serviço da API)
 
-## Comparação de Modelos (Fase 5)
+### Comparação de Modelos (Fase 5)
 
 - Comando oficial:
   - `python -m src.compare_models --models-root artifacts/models --out-json artifacts/model_comparison.json --out-md artifacts/model_comparison.md`
@@ -716,7 +855,7 @@ Referências:
   - terciária: menor positive_rate holdout@0.5
 - O relatório é agregado e privacy-safe: sem listas de `RA`/IDs e sem valores de célula.
 
-## Seleção do Modelo Campeão (Fase 5)
+### Seleção do Modelo Campeão (Fase 5)
 
 - A seleção formal do campeão usa holdout `2023->2024` no threshold operacional `0.30`:
   - `python -m src.model_selection --models-root artifacts/models --output-json artifacts/model_selection.json --output-md artifacts/model_selection.md`
@@ -727,13 +866,13 @@ Referências:
   - maior `Recall`, depois maior `PR-AUC`, depois menor `positive_rate`, com desempate lexicográfico (`model_family/variant`).
 - Se ninguém passar os gates, o processo escolhe o maior `Recall` com status `WARNING` e justificativa explícita no artefato.
 
-## Justificativa da Escolha do Modelo Final (Fase 5)
+### Justificativa da Escolha do Modelo Final (Fase 5)
 
 - O modelo final é justificado a partir de `artifacts/model_selection.json` (fonte única da decisão formal).
 - A justificativa para a banca fica versionada em `docs/model_final_justification.md` e pode ser regenerada por `python -m src.model_justification`.
 - Critério oficial: `Recall` no holdout como métrica primária, `PR-AUC` como secundária e `positive_rate` como desempate, com threshold preferencial `0.30` (fallback `0.5` com `WARNING`).
 
-## Avaliação Holdout Temporal (Fase 5)
+### Avaliação Holdout Temporal (Fase 5)
 
 - A avaliação `2023->2024` é estritamente read-only: o modelo é treinado em `2022->2023` e apenas inferido no holdout.
 - Nos CLIs de treino (`src.train_baseline` e `src.train_hgb`), o bloco `evaluation_holdout` é incluído no `metadata.json` quando `--eval-holdout 1`.
@@ -741,7 +880,7 @@ Referências:
   - `python -m src.evaluate_holdout --models-root artifacts/models --dataset-path <xlsx> --output artifacts/holdout_evaluation.json`
   - o comando carrega `model.joblib` e avalia no holdout oficial sem refit.
 
-## Métricas Oficiais (Fase 5)
+### Métricas Oficiais (Fase 5)
 
 - O cálculo oficial de métricas está centralizado em `src/metrics.py`, evitando lógica duplicada entre CLIs.
 - Nesta fase, o threshold operacional padrão para foco em Recall é `0.30`.
@@ -750,7 +889,7 @@ Referências:
   - `evaluation_holdout` (pair `2023->2024`, quando `--eval-holdout 1`)
   - bloco de métricas com `Recall`, `Precision`, `F1`, `ROC-AUC`, `PR-AUC`, `positive_rate` e `confusion_matrix_at_0.5` (`tn/fp/fn/tp`).
 
-## Shift Temporal (Fase 5)
+### Shift Temporal (Fase 5)
 
 - A validacao oficial de shift roda no **MODEL frame** (pos feature engineering + feature pruning), que representa exatamente o que o modelo consome.
 - O relatorio inclui:
@@ -770,7 +909,7 @@ Referências:
   - `artifacts/temporal_shift_report.json` (obrigatorio)
   - `artifacts/temporal_shift_report.md` (opcional)
 
-## Promoção do Modelo Campeão (Fase 6)
+### Promoção do Modelo Campeão (Fase 6)
 
 - O treino já persiste pipelines por variante em `artifacts/models/<family>/<variant>/model.joblib`.
 - A promoção para serving copia deterministicamente o campeão selecionado para caminho fixo da API:
@@ -782,7 +921,7 @@ Referências:
   - `app/model/promoted_model.json` registra vencedor, source/dest, hashes `sha256` e timestamp;
   - `app/model/backups/<timestamp>/` guarda snapshot do modelo anterior quando `--backup 1`.
 
-## Promoção (Staging -> Prod Local) (Fase 6)
+### Promoção (Staging -> Prod Local) (Fase 6)
 
 - A promoção local agora aplica **policy objetiva** antes de copiar artefatos:
   - métrica principal: `Recall` no holdout
@@ -840,7 +979,7 @@ Rollback local:
 - usar snapshots em `app/model/backups/<timestamp>/`
 - promover novamente a versão desejada (ou restaurar `model.joblib`/`metadata.json` manualmente a partir do backup)
 
-## Versionamento Local de Modelos (Releases) (Fase 6)
+### Versionamento Local de Modelos (Releases) (Fase 6)
 
 - O projeto mantém dois níveis de artefatos:
   - `artifacts/models/<family>/<variant>/` = **build artifacts** (saída de treino por variante)
@@ -854,130 +993,18 @@ Rollback local:
 - Observação operacional:
   - a promoção da API continua usando o campeão do `model_selection`; o release versionado facilita rollback e auditoria local.
 
-## Atualização do Modelo na API (Troca de Versão e Rollback) (Fase 6)
+### Atualização do Modelo na API (Troca de Versão e Rollback) (Fase 6)
 
-Esta seção documenta o **procedimento operacional** para trocar a versão do modelo servido pela API e executar rollback local com segurança, reutilizando apenas os mecanismos já implementados no projeto.
+Resumo (README):
+- fluxo operacional recomendado: `treino -> seleção -> staging -> promote`;
+- validações de staging (`metadata_schema`, `/health`, `/version`);
+- reinício obrigatório da API após troca por causa do cache (`lru_cache`);
+- rollback por backup local (`app/model/backups/*`) ou release imutável (`artifacts/models/releases/*`).
 
-Pré-requisitos:
-- API FastAPI disponível (local ou em container).
-- Caminho de serving padrão:
-  - `app/model/model.joblib`
-  - `app/model/metadata.json`
-- O endpoint `GET /version` deve refletir `model_version`, `model_family`, `variant` e `threshold_operational`.
+Runbook detalhado (com comandos completos e observações operacionais):
+- `docs/pipeline_ml_deep_dives.md` (seção `Atualização do Modelo na API (Troca de Versão e Rollback) (Fase 6)`)
 
-Fluxo recomendado (staging -> prod):
-
-```bash
-# A) Treinar e avaliar candidatos (treino oficial 2022->2023, holdout 2023->2024)
-python -m src.train_baseline ...
-python -m src.train_hgb ...
-
-# B) Selecionar campeão com critério formal
-python -m src.model_selection \
-  --models-root artifacts/models \
-  --output-json artifacts/model_selection.json \
-  --output-md artifacts/model_selection.md
-
-# C) (Opcional) Criar release imutável para rastreabilidade/rollback
-python -m src.create_release \
-  --selection-path artifacts/model_selection.json \
-  --out-root artifacts/models/releases
-
-# D) Stage (não altera produção local)
-python -m src.promote_model \
-  --selection-path artifacts/model_selection.json \
-  --models-root artifacts/models \
-  --out-dir app/model/staging \
-  --stage-only 1 \
-  --backup 1 \
-  --force 0 \
-  --allow-warning 0
-```
-
-Se `artifacts/model_selection.json` estiver em `WARNING` (decision `ALLOW_WITH_OVERRIDE`), repetir com override explícito:
-
-```bash
-python -m src.promote_model \
-  --selection-path artifacts/model_selection.json \
-  --models-root artifacts/models \
-  --out-dir app/model/staging \
-  --stage-only 1 \
-  --backup 1 \
-  --force 0 \
-  --allow-warning 1
-```
-
-Validação antes de promover (staging):
-- Verificar manifesto: `app/model/staging/staging_manifest.json`
-- Validar contrato do metadata staged:
-  - `python -m src.metadata_schema --path app/model/staging/metadata.json`
-- Sanity check opcional do pipeline/dataset:
-  - `python -m src.smoke_pipeline`
-  - Observação: `src.smoke_pipeline` é um smoke check do pipeline/projeto; **não valida diretamente** o artefato em `app/model/staging/`.
-- Se a API estiver rodando em Docker com volume montado, validar endpoints:
-  - `curl http://localhost:8000/version`
-  - `curl http://localhost:8000/health`
-
-Promover staging -> prod local (troca efetiva):
-
-```bash
-python -m src.promote_model \
-  --selection-path artifacts/model_selection.json \
-  --from-staging app/model/staging \
-  --out-dir app/model \
-  --promote 1 \
-  --backup 1 \
-  --force 0 \
-  --allow-warning 0
-```
-
-Se o `selection.status` continuar em `WARNING`, pode ser necessário repetir com `--allow-warning 1` também no `promote`.
-
-Verificação pós-troca (obrigatória):
-1. Reiniciar a API/processo (ou reiniciar o container) após o `promote`.
-2. Consultar `GET /version`:
-   - `curl http://localhost:8000/version`
-   - validar `model_version`, `model_family`, `variant`, `threshold_operational`
-3. (Opcional) Testar `POST /predict` com payload válido mínimo:
-   - deve retornar `200` quando `model_loaded=true` e `metadata_loaded=true`
-
-Observação importante sobre reinício:
-- O serving usa cache em `app/deps.py` (`lru_cache`) para metadata/modelo/contexto.
-- Sem reiniciar o processo, a API pode continuar servindo a versão anterior mesmo após copiar novos arquivos para `app/model/`.
-
-Rollback local rápido (backup automático):
-- Backups ficam em `app/model/backups/<timestamp>/`
-- Cada snapshot inclui `model.joblib` e `metadata.json` anteriores
-
-Procedimento:
-
-```bash
-# A) Inspecionar backups disponíveis
-ls -1 app/model/backups
-
-# B) Restaurar arquivos do backup escolhido
-cp app/model/backups/<timestamp>/model.joblib app/model/model.joblib
-cp app/model/backups/<timestamp>/metadata.json app/model/metadata.json
-
-# C) Reiniciar API/container (obrigatório por causa do cache)
-# D) Validar versão restaurada
-curl http://localhost:8000/version
-```
-
-Rollback alternativo (via release imutável):
-- Se existir release em `artifacts/models/releases/<model_version>/`, é possível restaurar manualmente:
-  - copiar `model.joblib` e `metadata.json` da release para `app/model/`
-  - reiniciar API/container
-  - validar em `GET /version`
-
-Notas operacionais:
-- `--allow-warning` (governança) **não é** `--force` (sobrescrita de arquivos).
-- `--force 1` apenas permite sobrescrever destino existente; mantenha `--backup 1` para preservar rollback local.
-- `src.promote_model --promote 1` usa `--selection-path` (default: `artifacts/model_selection.json`) para reavaliar policy; se seu arquivo estiver em outro local, informe o path explicitamente.
-- Não versionar `app/model/model.joblib` nem `app/model/metadata.json` no git; versione apenas documentação/manifests quando fizer sentido.
-- Manifestos (`staging_manifest.json`, `promoted_model.json`, `release.json`) devem permanecer sem `RA`/IDs/PII.
-
-## Metadata do Modelo (Serving) (Fase 6)
+### Metadata do Modelo (Serving) (Fase 6)
 
 - O `metadata.json` de serving (`app/model/metadata.json`) segue schema mínimo validável para operação da API e monitoramento:
   - identidade/versionamento do modelo (`model_family`, `variant`, `model_version`, `trained_at`, `promoted_at`);
@@ -988,7 +1015,7 @@ Notas operacionais:
 - Comando oficial de validação:
   - `python -m src.metadata_schema --path app/model/metadata.json`
 
-## Referência de Drift (Fase 6)
+### Referência de Drift (Fase 6)
 
 - A referência oficial para monitoramento de drift é o **MODEL frame** (pós feature engineering + pruning), que representa exatamente o que o modelo consome.
 - O artefato salva uma amostra estratificada e determinística (até `1000` linhas por padrão), sem `RA`/PII:
@@ -1000,7 +1027,7 @@ Notas operacionais:
 - Comando oficial:
   - `python -m src.build_reference_data --model-dir app/model --out-dir app/model/reference --max-rows 1000 --backup 1 --force 0`
 
-## Versionamento do Dataset (Fase 6)
+### Versionamento do Dataset (Fase 6)
 
 - Todo treino/avaliacao passa a registrar fingerprint do dataset (`SHA-256` em streaming), sem salvar conteudo de linhas.
 - O `metadata.json` por variante inclui `dataset.path_hint`, `basename`, `bytes`, `mtime_utc` e `sha256`.
@@ -1008,7 +1035,7 @@ Notas operacionais:
 - Comando utilitario:
   - `python -m src.dataset_versioning --path dataset/PEDE_PASSOS_DATASET_FIAP.xlsx --context manual_check --out artifacts/dataset_versions/manual_check.json`
 
-## Schema Formal de Saída (Fase 6)
+### Schema Formal de Saída (Fase 6)
 
 - Contrato formal implementado em `app/schemas.py` com modelos Pydantic:
   - `PredictionResult` (`risk_proba`, `risk_class`, `threshold_applied`, `model_version`, `model_family`, `variant`, `decision_policy`, `notes`)
@@ -1041,7 +1068,7 @@ Exemplo de resposta (single):
 }
 ```
 
-## Rodar API Local (Fase 6)
+### Rodar API Local (Fase 6)
 
 - Subir aplicação:
   - `uvicorn app.main:app --reload --port 8000`
@@ -1085,7 +1112,7 @@ Exemplo `GET /version` (sem metadata carregado):
 }
 ```
 
-## Docker (Deploy Local) (Fase 6)
+### Docker (Deploy Local) (Fase 6)
 
 - A imagem usa `python:3.11-slim`, instala dependências via `requirements.txt` e roda `uvicorn` como usuário não-root
 - `dataset/` e `artifacts/` não entram no build context (ver `.dockerignore`)
@@ -1119,14 +1146,14 @@ curl -s http://localhost:8000/health
 curl -s http://localhost:8000/version
 ```
 
-## Carregamento do Modelo (Serving) (Fase 6)
+### Carregamento do Modelo (Serving) (Fase 6)
 
 - O artefato servido é `app/model/model.joblib` (promovido via `python -m src.promote_model`)
 - O carregamento é `lazy` + cache em `app/deps.py` (não recarrega a cada request)
 - `GET /version` expõe `model_loaded` e `model_joblib_exists` para diagnóstico rápido
 - `POST /predict` retorna `503` com `notes` quando o modelo não está disponível ou falha no load
 
-## POST /predict (Fase 6)
+### POST /predict (Fase 6)
 
 - Formatos aceitos no body:
   - registro único (`{...}`)
@@ -1218,7 +1245,12 @@ Exemplo de resposta:
 }
 ```
 
-## Mensuração em Produção (Ground Truth Delay) (Fase 7)
+</details>
+
+<details>
+<summary>Monitoramento, observabilidade, drift e dashboard (Fase 7) — expandir</summary>
+
+### Mensuração em Produção (Ground Truth Delay) (Fase 7)
 
 Como o rótulo de negócio (`Defasagem_{t+1}`) chega com atraso, a mensuração em produção é separada em dois blocos:
 
@@ -1276,7 +1308,7 @@ python -m src.offline_evaluation \
   - não logar `RA`, listas de IDs, payload raw, valores de célula ou probabilidades individuais
   - logs/artefatos de monitoramento devem conter apenas contagens, histogramas e taxas agregadas
 
-## Retenção e Limpeza Local (Fase 7)
+### Retenção e Limpeza Local (Fase 7)
 
 Para reduzir uso de disco e exposição desnecessária de artefatos locais, o projeto inclui uma rotina simples de retenção/limpeza baseada apenas em metadados de filesystem (path, `mtime`, tamanho), sem abrir conteúdo de arquivos.
 
@@ -1332,7 +1364,7 @@ Observações:
   - se o arquivo continuar recebendo append, o `mtime` fica recente e entradas antigas não serão removidas individualmente
   - para retenção fina por evento, o próximo passo recomendado é rotação de arquivos (ex.: diário)
 
-## Não-regressão do Modelo (Fase 7)
+### Não-regressão do Modelo (Fase 7)
 
 O projeto inclui um check de não-regressão do modelo campeão baseado em artefatos JSON, sem depender do dataset no CI.
 
@@ -1374,7 +1406,7 @@ Observação:
 - Este check não recalcula métricas; ele valida consistência mínima de qualidade a partir dos artefatos de seleção/metadata.
 - Um modo local de recálculo com dataset real pode ser adicionado depois, mas fica fora do escopo deste check CI-friendly.
 
-## Logging Estruturado (Fase 7)
+### Logging Estruturado (Fase 7)
 
 O projeto usa logging estruturado em JSON por padrão (1 linha por evento), com foco em observabilidade local/Docker e sem vazamento de PII.
 
@@ -1425,7 +1457,7 @@ Observações:
 - A configuração é idempotente (não duplica handlers do projeto em chamadas repetidas de `setup_logging`)
 - O projeto mantém handlers no `root logger` (com `propagate=True` nos loggers filhos) para compatibilidade com `pytest caplog`
 
-## Privacidade Operacional (Fase 7)
+### Privacidade Operacional (Fase 7)
 
 Política operacional (logs, monitoramento e artefatos):
 
@@ -1459,7 +1491,7 @@ Guardrails implementados:
   - erro de extras leakage-like retorna mensagem genérica (sem listar campos sensíveis enviados)
   - `422` de `/predict` retorna resposta sanitizada (sem ecoar `input` do Pydantic)
 
-## Drift (Evidently) (Fase 7)
+### Drift (Evidently) (Fase 7)
 
 Relatório visual local de drift em HTML (sem cloud) usando **Evidently**, comparando:
 
@@ -1506,7 +1538,7 @@ Observações:
 - A geração automática de `current_csv` a partir do dataset XLSX (modo simulado local) fica fora do escopo desta tarefa; o CLI atual recebe `--current-csv`.
 - O relatório opera apenas em **MODEL frame**, preservando privacidade operacional (sem `RA`, sem nomes, sem payload da API).
 
-## Dashboard de Drift (Streamlit) (Fase 7)
+### Dashboard de Drift (Streamlit) (Fase 7)
 
 Aplicação local (read-only) para visualizar:
 
@@ -1554,7 +1586,7 @@ Observação:
 - uso local apenas (sem cloud, sem autenticação)
 - não exibe tabelas do MODEL frame nem payload raw
 
-## CI (GitHub Actions) (Fase 7)
+### CI (GitHub Actions) (Fase 7)
 
 - Workflow em `.github/workflows/ci.yml`
 - Executa em `push` e `pull_request` (`main`/`master`) com:
@@ -1567,6 +1599,8 @@ Observação:
   - `python -m src.validate`
   - `python -m src.cohort_stats`
 
+</details>
+
 ## Checklist do Projeto - Datathon Machine Learning Engineering
 
 Este checklist foi elaborado considerando explicitamente as inconsistências reais do dataset fornecido (schemas distintos entre anos, colunas duplicadas, valores inválidos, mudanças semânticas de campos e interseção parcial de estudantes entre períodos). As etapas descritas adotam práticas de Data Engineering e MLOps para garantir robustez, reprodutibilidade e validade estatística do modelo em produção.
@@ -1574,9 +1608,9 @@ Este checklist foi elaborado considerando explicitamente as inconsistências rea
 Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 
 Progresso geral (barra visual):
-`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜]`
+`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜]`
 
-`104 de 113 tarefas concluídas (92.0%)`
+`106 de 113 tarefas concluídas (93.8%)`
 
 | Fase | Progresso |
 |---|---|
@@ -1587,11 +1621,14 @@ Progresso geral (barra visual):
 | Fase 5 - Pipeline, Treinamento e Avaliação | 17/17 |
 | Fase 6 - Artefatos, API e Deploy | 16/16 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 13/13 |
-| Fase 8 - Documentação e Entrega Final | 14/23 |
-| Total | 104/113 |
+| Fase 8 - Documentação e Entrega Final | 16/23 |
+| Total | 106/113 |
 
 Nota:
 - A `Fase 9` é opcional e fica fora da contagem oficial de progresso (`barra`, `X/Y` e `%`).
+
+<details>
+<summary>Checklist detalhado por fase (expandir)</summary>
 
 ### Fase 1 - Entendimento do Problema e Target [13/13]
 - [x] Compreender o objetivo de negócio: prever o risco de defasagem escolar (t+1)
@@ -1707,12 +1744,12 @@ Nota de shift temporal:
 - [x] Implementar relatório de drift com Evidently
 - [x] Criar aplicação Streamlit para visualização do relatório de drift
 
-### Fase 8 - Documentação e Entrega Final [14/23]
+### Fase 8 - Documentação e Entrega Final [16/23]
 - [x] Documentar visão geral do problema e objetivo
 - [x] Documentar stack tecnológica
-- [ ] Adicionar versionamento/changelog dos contratos (`docs/contracts`)
+- [x] Adicionar versionamento/changelog dos contratos (`docs/contracts`)
 - [x] Documentar estrutura do projeto
-- [ ] Documentar etapas do pipeline de Machine Learning
+- [x] Documentar etapas do pipeline de Machine Learning
 - [ ] Documentar ciclo de vida em produção: entrada de alunos novos, validação de contrato, inferência, logging, drift, retreino, promoção/rollback
 - [ ] Documentar explicitamente contratos em produção (data contracts + contrato de payload da API + contrato de saída)
 - [ ] Documentar estratégia de retreino (gatilhos por tempo e/ou por drift, e como executar)
@@ -1738,6 +1775,8 @@ Nota de shift temporal:
 - [ ] Publicar dashboard operacional consolidando inferência, drift e métricas pós-fato
 - [ ] Adicionar testes de carga básicos para API de inferência
 - [ ] Preparar pacote de evidências para banca (runbook + artefatos + checklist de auditoria)
+
+</details>
 
 <details>
 <summary>Notas de uso do checklist</summary>

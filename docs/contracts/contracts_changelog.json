@@ -1,0 +1,101 @@
+{
+  "entries": [
+    {
+      "changes_by_year": {
+        "2022": {
+          "change_kind": "lineage_only",
+          "columns_added": [],
+          "columns_count": 57,
+          "columns_removed": [],
+          "dtype_changed": [],
+          "lineage": {
+            "dataset_basename": null,
+            "dataset_sha256": null
+          },
+          "lineage_changed": true,
+          "pii_changed": [],
+          "presence_changed": [],
+          "previous_lineage": {
+            "dataset_basename": "BASE DE DADOS PEDE 2024 - DATATHON.xlsx",
+            "dataset_sha256": null
+          },
+          "previous_schema_sha256": "fded90b9429c9a465df5a793e3d996e50ea9e5cd15b2bd3a0c7732f0ed458cc5",
+          "rules_changed": [],
+          "rules_changed_count": 0,
+          "schema_changed": false,
+          "schema_sha256": "fded90b9429c9a465df5a793e3d996e50ea9e5cd15b2bd3a0c7732f0ed458cc5"
+        },
+        "2023": {
+          "change_kind": "lineage_only",
+          "columns_added": [],
+          "columns_count": 57,
+          "columns_removed": [],
+          "dtype_changed": [],
+          "lineage": {
+            "dataset_basename": null,
+            "dataset_sha256": null
+          },
+          "lineage_changed": true,
+          "pii_changed": [],
+          "presence_changed": [],
+          "previous_lineage": {
+            "dataset_basename": "BASE DE DADOS PEDE 2024 - DATATHON.xlsx",
+            "dataset_sha256": null
+          },
+          "previous_schema_sha256": "5fc95b8c5f711f9b10e2e2eb26e30487bc3fb3592542494924fea66251226946",
+          "rules_changed": [],
+          "rules_changed_count": 0,
+          "schema_changed": false,
+          "schema_sha256": "5fc95b8c5f711f9b10e2e2eb26e30487bc3fb3592542494924fea66251226946"
+        },
+        "2024": {
+          "change_kind": "lineage_only",
+          "columns_added": [],
+          "columns_count": 57,
+          "columns_removed": [],
+          "dtype_changed": [],
+          "lineage": {
+            "dataset_basename": null,
+            "dataset_sha256": null
+          },
+          "lineage_changed": true,
+          "pii_changed": [],
+          "presence_changed": [],
+          "previous_lineage": {
+            "dataset_basename": "BASE DE DADOS PEDE 2024 - DATATHON.xlsx",
+            "dataset_sha256": null
+          },
+          "previous_schema_sha256": "b993c1fbd3fa2231111a0977d387241a225970ebcd1564ec0d13fc552b99e066",
+          "rules_changed": [],
+          "rules_changed_count": 0,
+          "schema_changed": false,
+          "schema_sha256": "b993c1fbd3fa2231111a0977d387241a225970ebcd1564ec0d13fc552b99e066"
+        }
+      },
+      "contract_version_declared": "1.0.0",
+      "dataset_basename": null,
+      "dataset_sha256": null,
+      "generated_at": "2026-02-23T05:39:08.553291+00:00",
+      "notes": [
+        "comparison_against_existing_contract_files"
+      ],
+      "summary": {
+        "changed_years": [
+          2022,
+          2023,
+          2024
+        ],
+        "created_years": [],
+        "lineage_only_years": [
+          2022,
+          2023,
+          2024
+        ],
+        "total_structural_changes": 0,
+        "unchanged_years": [],
+        "updated_years": []
+      }
+    }
+  ],
+  "schema_version": "1.0.0"
+}
