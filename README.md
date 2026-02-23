@@ -328,6 +328,51 @@ Observação sobre SKIP: alguns testes de pipeline usam `pytest.importorskip("sk
 Se o ambiente não tiver sklearn disponível, esses testes serão marcados como `SKIPPED`.
 No CI da Fase 7, manter instalação via `requirements-dev.txt` para evitar skip indevido.
 
+### Ambiente isolado para Drift + Dashboard (Evidently + Streamlit)
+
+Para evitar conflitos locais de dependências (especialmente `protobuf`) entre versões antigas de `streamlit` instaladas globalmente e o `evidently` usado no relatório de drift, use um ambiente separado para a frente de dashboard/visualização:
+
+Recomendação de ambiente:
+
+- Python `3.11` (preferencial para a stack de dashboard: `Streamlit + Evidently`)
+- venv dedicada (`.venv-dashboard`) para não misturar dependências com API/treino
+
+```bash
+scripts/bootstrap_dashboard_env.sh
+source .venv-dashboard/bin/activate
+# quando a app Streamlit estiver implementada:
+streamlit run dashboards/streamlit_app.py
+```
+
+Esse script instala `requirements-dashboard.txt` em uma venv separada (`.venv-dashboard` por padrão), preservando o ambiente principal (`.venv`) da API/treino/CI.
+Ele valida a versão do Python e falha com mensagem clara quando o interpretador local não é compatível com o pin atual do `Streamlit` (ex.: `Python 3.9.7`).
+
+Se o seu `python3` local não for compatível, informe explicitamente o interpretador:
+
+```bash
+PYTHON_BIN=python3.11 scripts/bootstrap_dashboard_env.sh
+# ou
+scripts/bootstrap_dashboard_env.sh .venv-dashboard python3.11
+```
+
+Exemplo com `pyenv`:
+
+```bash
+PYENV_VERSION=3.11.9 scripts/bootstrap_dashboard_env.sh .venv-dashboard python3.11
+```
+
+Observação de reprodutibilidade (opcional):
+
+- após validar a stack localmente, você pode gerar um lock do ambiente de dashboard (ex.: `requirements-dashboard.lock`) com `pip freeze` dentro da `.venv-dashboard`
+- como isso pode variar por SO/arquitetura, trate esse lock como artefato de ambiente (ou documente o contexto em que foi gerado)
+
+Se quiser outro diretório de venv:
+
+```bash
+scripts/bootstrap_dashboard_env.sh .venv-ui
+source .venv-ui/bin/activate
+```
+
 ### Smoke da Pipeline
 
 Executar smoke oficial:
@@ -1336,6 +1381,101 @@ Guardrails implementados:
   - erro de extras leakage-like retorna mensagem genérica (sem listar campos sensíveis enviados)
   - `422` de `/predict` retorna resposta sanitizada (sem ecoar `input` do Pydantic)
 
+## Drift (Evidently) (Fase 7)
+
+Relatório visual local de drift em HTML (sem cloud) usando **Evidently**, comparando:
+
+- referência: `app/model/reference/reference_model_frame.csv`
+- atual: um `CSV` de **MODEL frame** fornecido por você (`--current-csv`)
+
+Saídas padrão:
+
+- `artifacts/drift_report.html` (obrigatório)
+- `artifacts/drift_report_summary.json` (resumo agregado; opcional com `--no-json`)
+
+Pré-requisito:
+
+- gere a referência antes com `python -m src.build_reference_data`
+
+Como rodar:
+
+```bash
+python -m src.drift \
+  --reference-dir app/model/reference \
+  --current-csv <caminho_para_current_model_frame.csv> \
+  --out-html artifacts/drift_report.html \
+  --out-json artifacts/drift_report_summary.json
+```
+
+Regras/contratos:
+
+- o `current_csv` deve estar em **MODEL frame** (sem `RA`/PII, sem payload raw)
+- colunas extras no `current_csv` são ignoradas
+- colunas faltantes em relação à referência geram `FAIL` (erro claro com preview)
+- amostragem determinística (quando necessário) com `--max-rows` e `--seed`
+
+Status do resumo (`PASS/WARNING/FAIL`):
+
+- `FAIL` se `share_drifted_features >= 0.30`
+- `WARNING` se `>= 0.10`
+- `PASS` caso contrário
+
+Observações:
+
+- `src.temporal_shift` e `src.drift` são **complementares**:
+  - `src.temporal_shift`: relatório determinístico/gates do projeto (JSON/MD)
+  - `src.drift`: relatório visual HTML com Evidently para inspeção local
+- A geração automática de `current_csv` a partir do dataset XLSX (modo simulado local) fica fora do escopo desta tarefa; o CLI atual recebe `--current-csv`.
+- O relatório opera apenas em **MODEL frame**, preservando privacidade operacional (sem `RA`, sem nomes, sem payload da API).
+
+## Dashboard de Drift (Streamlit) (Fase 7)
+
+Aplicação local (read-only) para visualizar:
+
+- `artifacts/drift_report.html` (Evidently HTML)
+- `artifacts/drift_report_summary.json` (resumo agregado, quando existir)
+
+Pré-requisito:
+
+1. Gerar o relatório de drift:
+
+```bash
+python -m src.drift \
+  --reference-dir app/model/reference \
+  --current-csv <caminho_para_current_model_frame.csv> \
+  --out-html artifacts/drift_report.html \
+  --out-json artifacts/drift_report_summary.json
+```
+
+2. Usar a venv isolada de dashboard (recomendado para evitar conflito `protobuf` entre `Streamlit` e `Evidently`):
+
+```bash
+scripts/bootstrap_dashboard_env.sh
+source .venv-dashboard/bin/activate
+```
+
+Como rodar o dashboard:
+
+```bash
+streamlit run dashboards/streamlit_app.py
+```
+
+Acessar no navegador:
+
+- `http://localhost:8501`
+
+Funcionalidades:
+
+- path configurável do HTML (`artifacts/drift_report.html` por padrão)
+- path configurável do summary (`artifacts/drift_report_summary.json` por padrão)
+- upload opcional de HTML alternativo (`.html`) sem sobrescrever arquivos locais
+- exibição apenas de agregados (status, contagens, taxas, métricas de drift)
+
+Observação:
+
+- uso local apenas (sem cloud, sem autenticação)
+- não exibe tabelas do MODEL frame nem payload raw
+
 ## CI (GitHub Actions) (Fase 7)
 
 - Workflow em `.github/workflows/ci.yml`
@@ -1358,7 +1498,7 @@ Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 Progresso geral (barra visual):
 `[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜]`
 
-`101 de 113 tarefas concluídas (89.4%)`
+`103 de 113 tarefas concluídas (91.2%)`
 
 | Fase | Progresso |
 |---|---|
@@ -1368,9 +1508,9 @@ Progresso geral (barra visual):
 | Fase 4 - Pré-processamento e Engenharia de Features | 10/10 |
 | Fase 5 - Pipeline, Treinamento e Avaliação | 17/17 |
 | Fase 6 - Artefatos, API e Deploy | 16/16 |
-| Fase 7 - Testes, Monitoramento e Dashboard | 11/13 |
+| Fase 7 - Testes, Monitoramento e Dashboard | 13/13 |
 | Fase 8 - Documentação e Entrega Final | 13/23 |
-| Total | 101/113 |
+| Total | 103/113 |
 
 Nota:
 - A `Fase 9` é opcional e fica fora da contagem oficial de progresso (`barra`, `X/Y` e `%`).
@@ -1474,7 +1614,7 @@ Nota de shift temporal:
 - [x] Definir estratégia de promoção de modelo (staging -> prod local) com critério objetivo (Recall/PR-AUC/threshold)
 - [x] Documentar procedimento de atualização do modelo na API (troca de versão e rollback local)
 
-### Fase 7 - Testes, Monitoramento e Dashboard [11/13]
+### Fase 7 - Testes, Monitoramento e Dashboard [13/13]
 - [x] Criar testes unitários e de integração com pytest
 - [x] Garantir cobertura mínima de 80% com `pytest-cov`
 - [x] Adicionar CI automatizada (rodar `pytest`, coverage, `python -m src.validate` e `python -m src.cohort_stats`)
@@ -1486,8 +1626,8 @@ Nota de shift temporal:
 - [x] Implementar teste de não-regressão do modelo com limiares mínimos de métricas (ex.: Recall e/ou PR-AUC) (`python -m src.regression_check` + `tests/test_model_regression.py`)
 - [x] Configurar logging estruturado (JSON stdout por padrão, `log_event`, `request_id`, redaction anti-PII)
 - [x] Aplicar política de privacidade operacional (não logar identificadores sensíveis como `RA` em API e monitoramento) (`src/privacy.py` + redaction no logger + `422` sanitizado no `/predict`)
-- [ ] Implementar relatório de drift com Evidently
-- [ ] Criar aplicação Streamlit para visualização do relatório de drift
+- [x] Implementar relatório de drift com Evidently
+- [x] Criar aplicação Streamlit para visualização do relatório de drift
 
 ### Fase 8 - Documentação e Entrega Final [13/23]
 - [x] Documentar visão geral do problema e objetivo

@@ -1,0 +1,135 @@
+name: Dashboard Smoke (Manual)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  streamlit-drift-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dashboard.txt
+
+      - name: Bootstrap isolated dashboard env
+        run: |
+          PYTHON_BIN=python3.11 bash scripts/bootstrap_dashboard_env.sh .venv-dashboard
+
+      - name: Generate synthetic MODEL-frame inputs (reference/current)
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          import pandas as pd
+
+          ref_dir = Path("app/model/reference")
+          ref_dir.mkdir(parents=True, exist_ok=True)
+          artifacts_dir = Path("artifacts")
+          artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+          reference_df = pd.DataFrame(
+              {
+                  "feat_num": [0.0, 0.1, 0.2, 0.15, 0.05, 0.12, 0.11, 0.09],
+                  "feat_cat": ["A", "A", "B", "A", "B", "A", "A", "B"],
+              }
+          )
+          current_df = pd.DataFrame(
+              {
+                  "feat_num": [9.9, 10.1, 10.5, 11.0, 8.8, 9.7, 10.9, 10.2],
+                  "feat_cat": ["C", "C", "A", "C", "B", "C", "C", "C"],
+                  "extra_noise_col": [1, 2, 3, 4, 5, 6, 7, 8],
+              }
+          )
+
+          reference_df.to_csv(ref_dir / "reference_model_frame.csv", index=False)
+          current_df.to_csv(artifacts_dir / "current_model_frame_smoke.csv", index=False)
+          (ref_dir / "reference_meta.json").write_text(
+              json.dumps(
+                  {
+                      "model_version": "ci-smoke-2026-02-23",
+                      "winner": {
+                          "model_family": "baseline_logreg",
+                          "variant": "dashboard_smoke",
+                      },
+                  },
+                  ensure_ascii=False,
+                  indent=2,
+              ),
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Generate drift report artifacts (Evidently HTML + summary)
+        run: |
+          ./.venv-dashboard/bin/python -m src.drift \
+            --reference-dir app/model/reference \
+            --current-csv artifacts/current_model_frame_smoke.csv \
+            --out-html artifacts/drift_report.html \
+            --out-json artifacts/drift_report_summary.json \
+            --max-rows 500 \
+            --seed 42
+
+      - name: Start Streamlit dashboard (headless)
+        run: |
+          nohup ./.venv-dashboard/bin/streamlit run dashboards/streamlit_app.py \
+            --server.headless true \
+            --server.address 127.0.0.1 \
+            --server.port 8501 \
+            --browser.gatherUsageStats false \
+            > streamlit-smoke.log 2>&1 &
+          echo $! > streamlit-smoke.pid
+
+      - name: Wait for Streamlit and probe endpoints
+        run: |
+          python - <<'PY'
+          import time
+          import urllib.request
+
+          urls = [
+              "http://127.0.0.1:8501/_stcore/health",
+              "http://127.0.0.1:8501/",
+          ]
+          deadline = time.time() + 60
+          last_error = None
+          while time.time() < deadline:
+              for url in urls:
+                  try:
+                      with urllib.request.urlopen(url, timeout=5) as resp:
+                          body = resp.read(2000).decode("utf-8", errors="replace")
+                          if resp.status == 200:
+                              print(f"OK {url} status={resp.status}")
+                              if "Streamlit" in body or "ok" in body.lower():
+                                  raise SystemExit(0)
+                  except Exception as exc:
+                      last_error = exc
+              time.sleep(1)
+          raise SystemExit(f"Streamlit smoke probe failed: {last_error}")
+          PY
+
+      - name: Stop Streamlit (always)
+        if: always()
+        run: |
+          if [ -f streamlit-smoke.pid ]; then
+            kill "$(cat streamlit-smoke.pid)" || true
+          fi
+
+      - name: Upload dashboard smoke artifacts (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-smoke-artifacts
+          path: |
+            artifacts/drift_report.html
+            artifacts/drift_report_summary.json
+            streamlit-smoke.log
+          if-no-files-found: warn
+
