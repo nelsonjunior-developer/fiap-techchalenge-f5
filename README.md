@@ -73,9 +73,9 @@ O modelo continua com caráter preditivo de apoio à decisão humana: não é ca
 
 ## Como Navegar Este README
 
-- Leitura rápida (banca/gestão): `Visão Geral`, `Target`, `Stack Tecnológica`, `Etapas do Pipeline`, `Ciclo de Vida em Produção`, `Contratos em Produção`, `Estratégia de Retreino`, `Limitações Conhecidas e Riscos Assumidos`, `Exemplos de Chamadas à API`, `CI` e `Checklist`.
-- Leitura técnica (engenharia/ML): `Dados e Ingestão`, `Data Contract`, `Contratos em Produção`, `Estratégia de Retreino`, `Limitações Conhecidas e Riscos Assumidos`, `Exemplos de Chamadas à API`, `Etapas do Pipeline` e os blocos detalhados (Fases 4 a 7), que estão em seções colapsáveis.
-- Operação local: `Ambiente Local (.venv)`, `Rodar API Local`, `Exemplos de Chamadas à API`, `Docker`, `Drift (Evidently)` e `Dashboard de Drift (Streamlit)`.
+- Leitura rápida (banca/gestão): `Visão Geral`, `Target`, `Stack Tecnológica`, `Etapas do Pipeline`, `Ciclo de Vida em Produção`, `Contratos em Produção`, `Estratégia de Retreino`, `Limitações Conhecidas e Riscos Assumidos`, `Exemplos de Chamadas à API`, `API Acessível Localmente`, `CI` e `Checklist`.
+- Leitura técnica (engenharia/ML): `Dados e Ingestão`, `Data Contract`, `Contratos em Produção`, `Estratégia de Retreino`, `Limitações Conhecidas e Riscos Assumidos`, `Exemplos de Chamadas à API`, `API Acessível Localmente`, `Etapas do Pipeline` e os blocos detalhados (Fases 4 a 7), que estão em seções colapsáveis.
+- Operação local: `Ambiente Local (.venv)`, `Rodar API Local`, `Exemplos de Chamadas à API`, `API Acessível Localmente`, `Docker`, `Drift (Evidently)` e `Dashboard de Drift (Streamlit)`.
 
 <details>
 <summary>Sumário de navegação (expandir)</summary>
@@ -98,6 +98,7 @@ O modelo continua com caráter preditivo de apoio à decisão humana: não é ca
   - `Limitações Conhecidas e Riscos Assumidos`
   - `Exemplos de Chamadas à API`
 - Setup e execução:
+  - `API Acessível Localmente (Run + Smoke)`
   - `Estrutura do Projeto`
   - `Ambiente Local (.venv)`
   - `Rodar API Local`
@@ -1351,6 +1352,161 @@ Referências rápidas:
 - `Schema Formal de Saída (Fase 6)`
 - `Privacidade Operacional (Fase 7)`
 
+## API Acessível Localmente (Run + Smoke)
+
+Esta seção consolida uma forma reprodutível de subir e validar a API localmente com scripts de apoio (sem depender apenas de comandos manuais soltos).
+
+Objetivo da tarefa:
+- demonstrar que a API está acessível localmente (`/health` e `/version`)
+- fornecer smoke test rápido para `/predict` (comportamento com e sem modelo promovido)
+- oferecer atalho opcional via Docker para demonstração/reprodução
+
+### 1) Scripts adicionados (atalhos locais)
+
+- `scripts/run_api_local.sh`
+  - sobe `uvicorn` local usando `.venv` por padrão
+  - aceita `HOST`, `PORT`, `RELOAD`, `LOG_LEVEL`, `ALLOW_PARTIAL_PAYLOAD`
+- `scripts/smoke_api_local.sh`
+  - valida `GET /health` e `GET /version`
+  - valida rota `/predict` com `422` (body inválido) e probe funcional (`503` sem modelo ou `200/400` com modelo)
+  - imprime `X-Request-ID` quando disponível
+- `scripts/run_api_docker_local.sh` (opcional)
+  - sobe a API em container com `docker run`
+  - monta `app/model` por volume por padrão
+
+### 2) Subir a API localmente (via `.venv`)
+
+Execução padrão:
+
+```bash
+scripts/run_api_local.sh
+```
+
+Exemplos com override:
+
+```bash
+PORT=8010 LOG_LEVEL=INFO scripts/run_api_local.sh
+```
+
+```bash
+ALLOW_PARTIAL_PAYLOAD=1 PORT=8010 scripts/run_api_local.sh
+```
+
+Notas:
+- por padrão o script usa `./.venv/bin/python`
+- se necessário, você pode apontar outro Python:
+
+```bash
+PYTHON_BIN=python3 scripts/run_api_local.sh
+```
+
+### 3) Smoke test local (runbook de validação)
+
+Com a API já rodando, execute:
+
+```bash
+scripts/smoke_api_local.sh
+```
+
+Exemplo com porta customizada:
+
+```bash
+BASE_URL=http://127.0.0.1:8010 scripts/smoke_api_local.sh
+```
+
+Comportamento esperado do smoke:
+- `GET /health` -> `200`
+- `GET /version` -> `200`
+- `POST /predict` com body inválido -> `422` (prova de acessibilidade da rota/validação HTTP)
+- `POST /predict` com probe funcional:
+  - sem modelo/metadata promovidos -> `503` (esperado)
+  - com modelo/metadata disponíveis -> `200` **ou** `400` (dependendo do payload sintético vs contrato/política atual)
+
+Modo estrito (exigir `200` no probe funcional do `/predict`):
+
+```bash
+REQUIRE_PREDICT_200=1 scripts/smoke_api_local.sh
+```
+
+Quando usar `REQUIRE_PREDICT_200=1`:
+- após confirmar que a API está com modelo/metadata carregados
+- e após adaptar/validar payload compatível com `expected_raw_cols`
+
+### 4) Como interpretar o resultado (sem modelo vs com modelo)
+
+#### Cenário A: API acessível sem modelo promovido (válido para esta tarefa)
+
+Sinais esperados:
+- `/health` = `200`
+- `/version` = `200`
+- `/predict` = `503`
+
+Isso indica:
+- aplicação está acessível localmente
+- serving de inferência ainda não está pronto (faltam artefatos em `app/model/*`)
+
+#### Cenário B: API acessível com modelo promovido
+
+Sinais esperados:
+- `/health` = `200`
+- `/version` = `200` com `model_loaded=true` e `metadata_loaded=true`
+- `/predict` = `200` (payload compatível) ou `400` (payload não compatível / política strict)
+
+Para aumentar a chance de `200`:
+- inspecione `expected_raw_cols` em `app/model/metadata.json`
+- use payload alinhado ao contrato (ver seção `Exemplos de Chamadas à API`)
+
+### 5) Atalho opcional via Docker (demonstração/reprodutibilidade)
+
+Subir via Docker (imagem já construída):
+
+```bash
+scripts/run_api_docker_local.sh
+```
+
+Com build automático + porta customizada:
+
+```bash
+AUTO_BUILD=1 HOST_PORT=8010 scripts/run_api_docker_local.sh
+```
+
+Observações:
+- por padrão o script monta `app/model` em `/app/app/model` (para inferência local, quando houver artefatos)
+- para desabilitar a montagem do modelo:
+
+```bash
+MODEL_MOUNT=0 scripts/run_api_docker_local.sh
+```
+
+Depois de subir via Docker, rode o smoke apontando a porta publicada:
+
+```bash
+BASE_URL=http://127.0.0.1:8010 scripts/smoke_api_local.sh
+```
+
+### 6) Troubleshooting rápido
+
+Se o smoke falhar:
+- verifique se a API está rodando e ouvindo na porta esperada
+- confira `/version`:
+  - `model_loaded`
+  - `metadata_loaded`
+  - `model_joblib_exists`
+- confira logs estruturados no stdout (incluindo `request_id`)
+- valide se `./.venv` contém `uvicorn` e dependências (`requirements-dev.txt`)
+
+### 7) Nota de privacidade
+
+- Os scripts de smoke usam payloads sintéticos e não exigem `RA`.
+- Mantenha testes locais sem PII (`RA`, `Nome_Anon`, `Avaliador*`).
+- Logs e monitoramento continuam agregados/privacy-safe por design.
+
+Referências rápidas:
+- `Rodar API Local (Fase 6)`
+- `POST /predict (Fase 6)`
+- `Exemplos de Chamadas à API`
+- `Contratos em Produção (Dados + API + Saída)`
+
 ## 📁 Estrutura do Projeto
 
 O repositório é organizado para separar claramente ingestão e tratamento de dados, treinamento do modelo, disponibilização via API, monitoramento e testes, garantindo manutenibilidade, reprodutibilidade e facilidade de deploy.
@@ -2494,7 +2650,7 @@ Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 Progresso geral (barra visual):
 `[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜]`
 
-`111 de 113 tarefas concluídas (98.2%)`
+`112 de 113 tarefas concluídas (99.1%)`
 
 | Fase | Progresso |
 |---|---|
@@ -2505,8 +2661,8 @@ Progresso geral (barra visual):
 | Fase 5 - Pipeline, Treinamento e Avaliação | 17/17 |
 | Fase 6 - Artefatos, API e Deploy | 16/16 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 13/13 |
-| Fase 8 - Documentação e Entrega Final | 21/23 |
-| Total | 111/113 |
+| Fase 8 - Documentação e Entrega Final | 22/23 |
+| Total | 112/113 |
 
 Nota:
 - A `Fase 9` é opcional e fica fora da contagem oficial de progresso (`barra`, `X/Y` e `%`).
@@ -2628,7 +2784,7 @@ Nota de shift temporal:
 - [x] Implementar relatório de drift com Evidently
 - [x] Criar aplicação Streamlit para visualização do relatório de drift
 
-### Fase 8 - Documentação e Entrega Final [21/23]
+### Fase 8 - Documentação e Entrega Final [22/23]
 - [x] Documentar visão geral do problema e objetivo
 - [x] Documentar stack tecnológica
 - [x] Adicionar versionamento/changelog dos contratos (`docs/contracts`)
@@ -2643,7 +2799,7 @@ Nota de shift temporal:
 - [x] Publicar código organizado no GitHub (PR `#1` aberta via GitHub CLI)
 - [x] Mesclar PR na `main` via GitHub CLI (PR `#1` mesclada)
 - [x] Commitar checklist, abrir PR de atualização, mesclar na `main` e limpar branch local (PR `#2` mesclada)
-- [ ] Disponibilizar API acessível localmente
+- [x] Disponibilizar API acessível localmente
 - [ ] Gravar vídeo gerencial (<= 5 minutos) explicando a solução
 - [x] Criar `agents.md` com convenções operacionais para agentes LLM
 - [x] Adicionar barra de progresso geral visual (`[🟩⬜...]`) no checklist
