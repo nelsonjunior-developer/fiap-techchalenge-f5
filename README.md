@@ -73,9 +73,9 @@ O modelo continua com caráter preditivo de apoio à decisão humana: não é ca
 
 ## Como Navegar Este README
 
-- Leitura rápida (banca/gestão): `Visão Geral`, `Target`, `Stack Tecnológica`, `Etapas do Pipeline`, `Ciclo de Vida em Produção`, `Contratos em Produção`, `Estratégia de Retreino`, `CI` e `Checklist`.
-- Leitura técnica (engenharia/ML): `Dados e Ingestão`, `Data Contract`, `Contratos em Produção`, `Estratégia de Retreino`, `Etapas do Pipeline` e os blocos detalhados (Fases 4 a 7), que estão em seções colapsáveis.
-- Operação local: `Ambiente Local (.venv)`, `Rodar API Local`, `Docker`, `Drift (Evidently)` e `Dashboard de Drift (Streamlit)`.
+- Leitura rápida (banca/gestão): `Visão Geral`, `Target`, `Stack Tecnológica`, `Etapas do Pipeline`, `Ciclo de Vida em Produção`, `Contratos em Produção`, `Estratégia de Retreino`, `Limitações Conhecidas e Riscos Assumidos`, `Exemplos de Chamadas à API`, `CI` e `Checklist`.
+- Leitura técnica (engenharia/ML): `Dados e Ingestão`, `Data Contract`, `Contratos em Produção`, `Estratégia de Retreino`, `Limitações Conhecidas e Riscos Assumidos`, `Exemplos de Chamadas à API`, `Etapas do Pipeline` e os blocos detalhados (Fases 4 a 7), que estão em seções colapsáveis.
+- Operação local: `Ambiente Local (.venv)`, `Rodar API Local`, `Exemplos de Chamadas à API`, `Docker`, `Drift (Evidently)` e `Dashboard de Drift (Streamlit)`.
 
 <details>
 <summary>Sumário de navegação (expandir)</summary>
@@ -95,6 +95,8 @@ O modelo continua com caráter preditivo de apoio à decisão humana: não é ca
   - `Ciclo de Vida em Produção (Operação do Modelo)`
   - `Contratos em Produção (Dados + API + Saída)`
   - `Estratégia de Retreino (Gatilhos + Execução)`
+  - `Limitações Conhecidas e Riscos Assumidos`
+  - `Exemplos de Chamadas à API`
 - Setup e execução:
   - `Estrutura do Projeto`
   - `Ambiente Local (.venv)`
@@ -1042,6 +1044,312 @@ Referências rápidas:
 - `Drift (Evidently) (Fase 7)`
 - `Não-regressão do Modelo (Fase 7)`
 - seções de promoção/versionamento do pipeline e `docs/pipeline_ml_deep_dives.md`
+
+## Limitações Conhecidas e Riscos Assumidos
+
+Esta seção consolida limitações conhecidas do modelo/sistema e os riscos assumidos no escopo desta entrega. O objetivo é tornar explícitos os limites de interpretação e de operação, além das mitigações já implementadas.
+
+Princípios de leitura:
+- O modelo é **preditivo** (não causal) e deve apoiar a tomada de decisão humana.
+- Limitações documentadas não invalidam a solução; elas delimitam o uso responsável e o plano de evolução.
+- Parte dos riscos foi aceita por escopo acadêmico/local, com mitigação operacional onde possível.
+
+### 1) Limitações conhecidas (modelo, dados e operação)
+
+| Categoria | Limitação conhecida | Impacto potencial | Mitigação atual no projeto | Severidade | Status |
+|---|---|---|---|---|---|
+| Semântica de dados | Ambiguidade em `Idade x Fase_Ideal` (ex.: mesma idade aparecendo com `Fase Alfa` e `Fase 1`) | Ruído semântico em feature categórica e interpretação de consistência de dados | Limitação documentada; `Fase_Ideal` tratada como categoria da base (sem recálculo automático); sem regra institucional formalizada no pipeline | Média | Parcialmente mitigada (documentada) |
+| Ground truth delay | O rótulo (`Defasagem_{t+1}`) chega com atraso | Não é possível medir Recall/PR-AUC no request online | Separação entre métricas online (proxies) e avaliação offline (`src.offline_evaluation`) | Alta | Mitigada por processo |
+| Avaliação de produção (offline) | Avaliação pós-fato é feita por replay local, não por join com IDs de produção | Pode divergir do “histórico real” caso versão/threshold mudem ao longo do período | Replay documentado como escolha de privacidade operacional; uso de metadata/modelo promovido; artefatos de avaliação e versão | Média | Mitigada por transparência |
+| Cobertura temporal de dados | Dataset local disponível é limitado a poucos períodos (`2022/2023/2024`) | Maior sensibilidade a mudanças de contexto e menor robustez estatística de generalização temporal | Holdout temporal explícito (`2023 -> 2024`), análise de shift e monitoramento de drift | Alta | Parcialmente mitigada |
+| Coorte por interseção de `RA` | Pares temporais usam apenas estudantes presentes em `t` e `t+1` | Possível viés de cobertura (entradas tardias/saídas/evasão não rotulada) | Regra de coorte é explícita e auditada (`cohort_stats`); limitação reconhecida | Alta | Mitigada por governança |
+| Payload parcial (alunos novos) | `ALLOW_PARTIAL_PAYLOAD=1` permite inferência com colunas faltantes imputadas | Pode reduzir qualidade da inferência em casos muito incompletos | Flag default `0`; logging agregado de missing; imputação sem valores “mágicos”; uso controlado | Média | Mitigada por guardrails |
+| Drift monitorado localmente | Relatórios de drift e dashboard são locais (sem alertas automáticos contínuos) | Dependência de rotina manual de observação | `src.drift`, summary JSON, dashboard Streamlit e workflow smoke manual | Média | Parcialmente mitigada |
+| Infra/escopo operacional | Sem teste de carga e sem HA/escala de produção | Risco operacional fora do escopo acadêmico/local | API local com health/version, Docker e logs estruturados; limitação documentada | Baixa (no escopo atual) | Aceita por escopo |
+
+### 2) Riscos assumidos (trade-offs do desenho)
+
+| Risco assumido | Quando pode ocorrer | Impacto | Guardrails atuais | Ação recomendada |
+|---|---|---|---|---|
+| Maior taxa de falsos positivos (trade-off de Recall) | Threshold focado em `Recall` para reduzir falsos negativos | Mais alunos podem ser sinalizados para acompanhamento sem estarem em risco real | `PR-AUC`, `Precision`, `F1`, threshold explícito no metadata e monitoring de `positive_rate` | Ajustar threshold/política com base em evidências offline e contexto operacional |
+| Mudança de população/processo antes do rótulo chegar | Alterações no perfil dos alunos, coleta ou processo escolar | Saída do modelo pode degradar antes da confirmação por métricas finais | Logs online agregados, drift report (Evidently), summary de missing, avaliação offline posterior | Investigar sinais online, gerar drift report e preparar retreino se persistente |
+| Uso indevido como decisão automática | Consumo do score sem mediação humana | Risco de decisão injusta ou interpretação causal indevida | Documentação explícita de uso como apoio; metadados e notas de rastreabilidade | Reforçar política de uso e revisão humana em decisões sensíveis |
+| Dependência de operação manual (retreino/promoção/rollback) | Falha de rotina, atraso operacional ou erro humano | Demora em reagir a drift/degradação ou promoção inadequada | Runbooks documentados, `model_selection`, `regression_check`, `promote_model`, backups/releases | Seguir checklist/runbook e registrar evidências antes de promover |
+| Artefatos locais de serving | `app/model/*` inconsistente, ausente ou troca incompleta | `/predict` indisponível (`503`) ou comportamento inesperado | `/health`, `/version`, backups, releases versionadas, rollback local | Validar artefatos após promoção e usar rollback em caso de regressão |
+
+### 3) Limites de uso do modelo (uso responsável)
+
+- O score de risco **não** deve ser usado como decisão automática, punitiva ou causal.
+- O modelo deve apoiar priorização de acompanhamento e triagem, com validação por equipe pedagógica/psicopedagógica.
+- A interpretação do score deve considerar:
+  - contexto institucional,
+  - qualidade do payload de entrada,
+  - versão do modelo (`model_version`) e threshold aplicado.
+
+### 4) O que já está mitigado vs o que permanece estrutural
+
+Mitigações implementadas no código/processo:
+- anti-leakage explícito (`src.leakage`, pruning, checks temporais)
+- contratos de dados e validação (`src.contracts`, `src.contract_validate`, `src.validate`)
+- privacidade operacional (`src/privacy.py`, redaction, `422` sanitizado, logs agregados)
+- monitoramento online + offline (`online_metrics.jsonl`, `src.offline_evaluation`)
+- drift local em `MODEL frame` (Evidently + Streamlit)
+- promoção/rollback com artefatos versionados e backups
+
+Limitações estruturais (não resolvidas apenas com engenharia local):
+- atraso na chegada do rótulo (`t+1`)
+- baixa quantidade de períodos históricos disponíveis
+- ambiguidades semânticas do dataset de origem (ex.: `Idade x Fase_Ideal`) sem regra institucional formalizada
+
+### 5) Relação com roadmap / redução de risco futura
+
+Itens já identificados para reduzir risco em evoluções futuras (Fase 9 / backlog):
+- automação de retreino com gatilho por tempo + drift
+- dashboard operacional consolidado (inferência + drift + métricas pós-fato)
+- explainability local do campeão (importâncias globais/análise de erro agregada)
+- testes de carga básicos para API
+
+Referências rápidas:
+- `Contratos em Produção (Dados + API + Saída)`
+- `Ciclo de Vida em Produção (Operação do Modelo)`
+- `Estratégia de Retreino (Gatilhos + Execução)`
+- `Mensuração em Produção (Ground Truth Delay) (Fase 7)`
+- `Privacidade Operacional (Fase 7)`
+- `Drift (Evidently) (Fase 7)`
+
+## Exemplos de Chamadas à API
+
+Esta seção reúne exemplos práticos de uso da API (`/health`, `/version`, `/predict`) para teste local e troubleshooting rápido. Os exemplos são intencionalmente sintéticos e devem ser adaptados ao contrato de entrada do modelo atualmente promovido.
+
+### 1) Pré-requisitos rápidos
+
+- API rodando localmente (ex.: `uvicorn app.main:app --reload --port 8000`)
+- base URL local: `http://127.0.0.1:8000`
+- para `POST /predict` retornar `200`, é necessário haver modelo/metadata válidos em `app/model/`
+
+Observação:
+- mesmo sem modelo promovido, `GET /health` e `GET /version` funcionam; `/predict` tende a retornar `503`.
+
+### 2) Checks básicos de sanidade (`/health` e `/version`)
+
+Health check:
+
+```bash
+curl -s http://127.0.0.1:8000/health | jq
+```
+
+Exemplo de resposta:
+
+```json
+{
+  "status": "ok"
+}
+```
+
+Version check (útil para diagnosticar serving e contrato atual):
+
+```bash
+curl -s http://127.0.0.1:8000/version | jq
+```
+
+O que conferir em `/version`:
+- `model_version`, `model_family`, `variant`
+- `threshold_operational`
+- `metadata_loaded`
+- `model_loaded`
+- `model_joblib_exists`
+
+### 3) Como descobrir o contrato esperado antes de chamar `/predict`
+
+O contrato de payload da API é **dinâmico por modelo promovido** e depende de `app/model/metadata.json` (`expected_raw_cols`).
+
+Exemplos para inspecionar localmente:
+
+```bash
+jq '.expected_raw_cols' app/model/metadata.json
+```
+
+Ou com resumo:
+
+```bash
+jq '{model_version, expected_raw_cols_count: (.expected_raw_cols | length), expected_raw_cols}' app/model/metadata.json
+```
+
+Se `app/model/metadata.json` não existir:
+- promova um modelo primeiro (ver `src.promote_model`), ou
+- espere `/predict` retornar `503` enquanto `/health` e `/version` seguem disponíveis.
+
+### 4) Exemplos de sucesso no `/predict` (ajustar ao `expected_raw_cols`)
+
+Importante:
+- Os payloads abaixo mostram **formato** (single/batch/envelope).
+- Troque `coluna_1`, `coluna_2`, etc. pelas colunas reais do seu `expected_raw_cols`.
+- Use dados sintéticos/sem PII.
+
+#### A) Registro único (single object)
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{
+    "coluna_1": 1,
+    "coluna_2": "categoria_a",
+    "coluna_3": 10.5
+  }' | jq
+```
+
+#### B) Batch (lista de registros)
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '[
+    {"coluna_1": 1, "coluna_2": "categoria_a", "coluna_3": 10.5},
+    {"coluna_1": 2, "coluna_2": "categoria_b", "coluna_3": 11.0}
+  ]' | jq
+```
+
+#### C) Envelope com `records`
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{
+    "records": [
+      {"coluna_1": 1, "coluna_2": "categoria_a", "coluna_3": 10.5},
+      {"coluna_1": 2, "coluna_2": "categoria_b", "coluna_3": 11.0}
+    ]
+  }' | jq
+```
+
+Exemplo resumido de resposta esperada (`200`):
+
+```json
+{
+  "predictions": [
+    {
+      "risk_proba": 0.21,
+      "risk_class": 0,
+      "threshold_applied": 0.3,
+      "model_version": "2026-02-20T12-00-00Z",
+      "model_family": "nonlinear_hgb",
+      "variant": "default",
+      "decision_policy": "fixed_threshold",
+      "notes": null
+    }
+  ],
+  "count": 1,
+  "generated_at": "2026-02-20T13:20:00+00:00"
+}
+```
+
+### 5) Exemplo para aluno novo / payload parcial (`ALLOW_PARTIAL_PAYLOAD`)
+
+Padrão (`ALLOW_PARTIAL_PAYLOAD=0`):
+- faltando colunas esperadas -> `400` com `missing_columns`
+
+Modo opcional (`ALLOW_PARTIAL_PAYLOAD=1`):
+- payload parcial é aceito
+- colunas faltantes viram `pd.NA`
+- a imputação da pipeline resolve os faltantes
+
+Exemplo (subir API com payload parcial habilitado):
+
+```bash
+ALLOW_PARTIAL_PAYLOAD=1 uvicorn app.main:app --reload --port 8000
+```
+
+Exemplo de request parcial (formato ilustrativo; adapte às colunas reais):
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"coluna_1": 1, "coluna_2": "categoria_a"}' | jq
+```
+
+Observação:
+- a API pode incluir resumo agregado de missing em `predictions[*].notes` (ex.: `missing_cols_rate`, `missing_values_rate`), sem alterar o schema principal.
+
+### 6) Exemplos de erro comuns (úteis para integração)
+
+#### A) `400` por colunas faltantes (`missing_columns`)
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"coluna_1": 1}' | jq
+```
+
+Resposta esperada (resumo):
+- `status=400`
+- `detail.missing_columns` com nomes das colunas ausentes
+
+#### B) `400` por extra leakage-like (ex.: `target`)
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"target": 1}' | jq
+```
+
+Resposta esperada (resumo):
+- `status=400`
+- mensagem genérica de bloqueio de colunas leakage-like (sem ecoar payload sensível)
+
+#### C) `422` por body inválido (schema HTTP/Pydantic)
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"records":"x"}' | jq
+```
+
+Resposta esperada (resumo):
+- `status=422`
+- payload sanitizado (sem `input` bruto do Pydantic no caso de `/predict`)
+
+#### D) `503` por modelo/metadata indisponíveis
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"coluna_1": 1, "coluna_2": "categoria_a"}' | jq
+```
+
+Resposta esperada (resumo):
+- `status=503`
+- `detail` indicando indisponibilidade de `model` e/ou `metadata`
+- usar `GET /version` para confirmar `metadata_loaded` e `model_loaded`
+
+### 7) Troubleshooting rápido (observabilidade)
+
+Ao testar a API, verifique:
+- header `X-Request-ID` (útil para correlacionar request com logs)
+- logs estruturados JSON (`stdout`) com eventos da API
+- `logs/online_metrics.jsonl` para métricas agregadas por request (`2xx/4xx/5xx/422`)
+- `GET /version` para diagnosticar:
+  - `model_loaded`
+  - `metadata_loaded`
+  - `model_joblib_exists`
+  - `threshold_operational`
+
+Exemplo para inspecionar headers:
+
+```bash
+curl -i http://127.0.0.1:8000/health
+```
+
+### 8) Nota de privacidade para testes locais
+
+- Use dados sintéticos nos exemplos e testes manuais.
+- Não enviar/logar identificadores sensíveis como `RA`, `Nome_Anon` e `Avaliador1..Avaliador6`.
+- O projeto aplica guardrails de privacidade operacional (redaction em logs e monitoramento agregado), mas o uso responsável na entrada continua sendo obrigatório.
+
+Referências rápidas:
+- `POST /predict`
+- `Contratos em Produção (Dados + API + Saída)`
+- `Schema Formal de Saída (Fase 6)`
+- `Privacidade Operacional (Fase 7)`
 
 ## 📁 Estrutura do Projeto
 
@@ -2184,9 +2492,9 @@ Este checklist foi elaborado considerando explicitamente as inconsistências rea
 Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 
 Progresso geral (barra visual):
-`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜]`
+`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜]`
 
-`109 de 113 tarefas concluídas (96.5%)`
+`111 de 113 tarefas concluídas (98.2%)`
 
 | Fase | Progresso |
 |---|---|
@@ -2197,8 +2505,8 @@ Progresso geral (barra visual):
 | Fase 5 - Pipeline, Treinamento e Avaliação | 17/17 |
 | Fase 6 - Artefatos, API e Deploy | 16/16 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 13/13 |
-| Fase 8 - Documentação e Entrega Final | 19/23 |
-| Total | 109/113 |
+| Fase 8 - Documentação e Entrega Final | 21/23 |
+| Total | 111/113 |
 
 Nota:
 - A `Fase 9` é opcional e fica fora da contagem oficial de progresso (`barra`, `X/Y` e `%`).
@@ -2320,7 +2628,7 @@ Nota de shift temporal:
 - [x] Implementar relatório de drift com Evidently
 - [x] Criar aplicação Streamlit para visualização do relatório de drift
 
-### Fase 8 - Documentação e Entrega Final [19/23]
+### Fase 8 - Documentação e Entrega Final [21/23]
 - [x] Documentar visão geral do problema e objetivo
 - [x] Documentar stack tecnológica
 - [x] Adicionar versionamento/changelog dos contratos (`docs/contracts`)
@@ -2329,8 +2637,8 @@ Nota de shift temporal:
 - [x] Documentar ciclo de vida em produção: entrada de alunos novos, validação de contrato, inferência, logging, drift, retreino, promoção/rollback
 - [x] Documentar explicitamente contratos em produção (data contracts + contrato de payload da API + contrato de saída)
 - [x] Documentar estratégia de retreino (gatilhos por tempo e/ou por drift, e como executar)
-- [ ] Documentar limitações conhecidas do modelo e riscos assumidos (parcial: incluída limitação semântica `Idade x Fase_Ideal`)
-- [ ] Documentar exemplos de chamadas à API
+- [x] Documentar limitações conhecidas do modelo e riscos assumidos (parcial: incluída limitação semântica `Idade x Fase_Ideal`)
+- [x] Documentar exemplos de chamadas à API
 - [x] Documentar setup de ambiente local com `.venv` e instalação de dependências
 - [x] Publicar código organizado no GitHub (PR `#1` aberta via GitHub CLI)
 - [x] Mesclar PR na `main` via GitHub CLI (PR `#1` mesclada)
