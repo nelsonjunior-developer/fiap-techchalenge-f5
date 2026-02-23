@@ -73,8 +73,8 @@ O modelo continua com caráter preditivo de apoio à decisão humana: não é ca
 
 ## Como Navegar Este README
 
-- Leitura rápida (banca/gestão): `Visão Geral`, `Target`, `Stack Tecnológica`, `Etapas do Pipeline`, `Ciclo de Vida em Produção`, `CI` e `Checklist`.
-- Leitura técnica (engenharia/ML): `Dados e Ingestão`, `Data Contract`, `Contratos em Produção`, `Etapas do Pipeline` e os blocos detalhados (Fases 4 a 7), que estão em seções colapsáveis.
+- Leitura rápida (banca/gestão): `Visão Geral`, `Target`, `Stack Tecnológica`, `Etapas do Pipeline`, `Ciclo de Vida em Produção`, `Contratos em Produção`, `Estratégia de Retreino`, `CI` e `Checklist`.
+- Leitura técnica (engenharia/ML): `Dados e Ingestão`, `Data Contract`, `Contratos em Produção`, `Estratégia de Retreino`, `Etapas do Pipeline` e os blocos detalhados (Fases 4 a 7), que estão em seções colapsáveis.
 - Operação local: `Ambiente Local (.venv)`, `Rodar API Local`, `Docker`, `Drift (Evidently)` e `Dashboard de Drift (Streamlit)`.
 
 <details>
@@ -94,6 +94,7 @@ O modelo continua com caráter preditivo de apoio à decisão humana: não é ca
 - Operação em produção:
   - `Ciclo de Vida em Produção (Operação do Modelo)`
   - `Contratos em Produção (Dados + API + Saída)`
+  - `Estratégia de Retreino (Gatilhos + Execução)`
 - Setup e execução:
   - `Estrutura do Projeto`
   - `Ambiente Local (.venv)`
@@ -826,6 +827,221 @@ Referências rápidas:
 - `POST /predict`
 - `Schema Formal de Saída do Modelo/API`
 - `Ciclo de Vida em Produção (Operação do Modelo)`
+
+## Estratégia de Retreino (Gatilhos + Execução)
+
+Esta seção formaliza a estratégia de retreino do projeto, separando claramente:
+- **sinais de investigação** (monitoramento online e drift),
+- **decisão de retreinar** (ciclo offline),
+- **decisão de promover** (gates + não-regressão).
+
+Princípio central:
+- **retreinar não implica promover**.
+- O retreino gera candidatos; a promoção depende de avaliação objetiva (Recall/PR-AUC), seleção formal e validações de segurança operacional.
+
+### 1) Objetivo da estratégia de retreino
+
+A estratégia de retreino existe para responder a três cenários principais:
+- mudança de distribuição dos dados de entrada (drift/qualidade de payload);
+- queda de desempenho real quando o `ground truth` chega (`t+1`);
+- atualização periódica do modelo quando há novo período de dados disponível.
+
+Como o rótulo chega com atraso, o projeto usa uma estratégia em duas camadas:
+- **online (sem rótulo)**: sinais/proxies para investigação
+- **offline (com rótulo)**: decisão baseada em métricas oficiais (Recall/PR-AUC etc.)
+
+### 2) Princípios operacionais (para evitar retreino por ruído)
+
+- `drift` alto, sozinho, **não** é evidência suficiente para promover modelo novo.
+- `422/400` altos indicam, em geral, problema de integração/contrato de entrada (não necessariamente problema do modelo).
+- métricas **offline** (`src.offline_evaluation`) têm prioridade sobre proxies online para decidir retreino.
+- mudanças devem ser tratadas com evidência e persistência:
+  - evitar reagir a um único request/batch atípico
+  - preferir confirmação por mais de uma observação/execução de monitoramento
+- promoção exige gates e não-regressão:
+  - `model_selection`
+  - `src.regression_check`
+  - critérios de `src.promotion_policy`
+
+### 3) Gatilhos de retreino (tempo + drift + desempenho)
+
+#### A) Gatilhos por tempo (cadência operacional)
+
+Objetivo:
+- garantir revisão periódica mesmo sem incidentes visíveis.
+
+Recomendação documental (ajustável ao calendário de dados):
+- **semanal**: revisar sinais online agregados (`online_metrics.jsonl`, logs estruturados)
+- **quando novo período `t+1` chega** (ex.: anual/semestral conforme disponibilidade): rodar avaliação offline
+- **após incorporação de novo ciclo de dados útil**: considerar rodada de retreino de candidatos
+
+Observação:
+- como o dataset institucional é anual no contexto atual (`2022/2023/2024`), o gatilho por tempo mais forte tende a ser a chegada de uma nova base/período.
+
+#### B) Gatilhos por drift e qualidade de entrada (online)
+
+Sinais típicos que justificam investigação e possível retreino:
+- `drift_report` (`src.drift`) em `WARNING` ou `FAIL`
+- `share_drifted_features` elevado (thresholds default documentados na seção de drift; ajustáveis por flags)
+- `positive_rate` fora da faixa esperada
+- aumento persistente de `missing_cols_rate` / `missing_values_rate`
+- aumento persistente de `4xx/422` (após descartar falha de integração)
+
+Importante:
+- esses sinais justificam **investigação** e possivelmente preparação de retreino; não implicam promoção automática.
+
+#### C) Gatilhos por desempenho real (offline, com ground truth)
+
+Sinais prioritários para iniciar retreino:
+- queda de `Recall` e/ou `PR-AUC` em `python -m src.offline_evaluation ...`
+- degradação persistente em relação ao desempenho esperado do campeão
+- resultados abaixo dos limiares mínimos usados nos gates de seleção/não-regressão
+
+Esse é o gatilho de maior peso porque mede desempenho real após chegada do rótulo (`t+1`).
+
+### 4) Matriz prática: sinal observado -> ação de retreino
+
+| Sinal observado | Interpretação provável | Ação recomendada | Retreinar agora? |
+|---|---|---|---|
+| `422` alto / erros de body | cliente enviando payload inválido | corrigir integração / contrato HTTP | Não |
+| `400` por `missing_columns` | quebra de contrato raw no cliente | corrigir payload/orquestração; revisar `ALLOW_PARTIAL_PAYLOAD` | Não (em geral) |
+| `503` recorrente | problema de serving / artefato | incidente operacional; validar `app/model/*` e restart | Não |
+| `missing_*_rate` alto + payload parcial frequente | degradação de qualidade de entrada / alunos novos | investigar integração/coleta; acompanhar impacto | Talvez (se persistir e afetar offline) |
+| `drift_report` em `WARNING` | mudança moderada de distribuição | investigar features e sinais online; monitorar | Talvez |
+| `drift_report` em `FAIL` + `positive_rate` anômala | mudança forte de população/processo | investigar e preparar rodada de retreino | Sim (avaliar) |
+| queda de `Recall`/`PR-AUC` no offline | degradação real de performance | iniciar ciclo completo de retreino + seleção | Sim (prioritário) |
+
+### 5) Retreino programado vs retreino emergencial
+
+#### Retreino programado (cadenciado)
+
+Quando usar:
+- chegada de novo período de dados
+- revisão periódica do modelo (governança)
+
+Objetivo:
+- testar se há ganho com dados mais recentes, mesmo sem incidente explícito
+
+Fluxo:
+- executar pipeline offline, comparar candidatos, manter campeão atual se não houver ganho/segurança suficiente
+
+#### Retreino emergencial (orientado por sinal)
+
+Quando usar:
+- drift severo persistente
+- queda de desempenho offline
+- mudança operacional relevante na entrada (schema/qualidade/população)
+
+Objetivo:
+- responder a degradação real ou provável, preservando estabilidade de serving
+
+Regra:
+- ainda assim seguir seleção/gates/promoção (não pular governança por urgência)
+
+### 6) Evidências mínimas antes de decidir retreinar/promover
+
+Antes de decidir retreino/promoção, reunir evidências (preferencialmente em artefatos):
+- `artifacts/drift_report_summary.json` (quando o gatilho for drift)
+- `artifacts/offline_metrics_*.json` / `.md` (pós-fato)
+- `artifacts/model_selection.json` (seleção formal do campeão)
+- saída de `python -m src.regression_check`
+- logs agregados (`logs/online_metrics.jsonl`) com comportamento observado
+
+Isso melhora auditabilidade da decisão (banca/operação local).
+
+### 7) Como executar o retreino (runbook resumido)
+
+Fluxo recomendado de execução (alto nível):
+
+1. Validar dados e contexto (se houver novo dataset/período)
+```bash
+python -m src.validate
+python -m src.cohort_stats
+```
+
+2. Treinar candidatos (baseline + modelo não-linear)
+```bash
+python -m src.train_baseline
+python -m src.train_hgb
+```
+
+3. Comparar e consolidar avaliação/seleção
+```bash
+python -m src.compare_models
+python -m src.evaluate_holdout
+python -m src.model_selection --models-root artifacts/models
+```
+
+4. Checar não-regressão do campeão selecionado (artefatos)
+```bash
+python -m src.regression_check \
+  --selection-path artifacts/model_selection.json \
+  --models-root artifacts/models
+```
+
+5. Promover campeão para serving local (com backup)
+```bash
+python -m src.promote_model \
+  --selection-path artifacts/model_selection.json \
+  --models-root artifacts/models \
+  --out-dir app/model \
+  --force 0 \
+  --backup 1
+```
+
+6. Regenerar referência de drift após promoção
+```bash
+python -m src.build_reference_data
+```
+
+7. Reiniciar API e validar sanidade
+- validar `GET /health`
+- validar `GET /version`
+- executar `POST /predict` de sanidade (single e/ou batch curto)
+
+Observação:
+- comandos e flags específicos já detalhados nas seções de pipeline/promoção; aqui o objetivo é registrar a sequência operacional de retreino.
+
+### 8) Critério de promoção após retreino (retreinar != promover)
+
+Após gerar candidatos, promover apenas se houver condição mínima de segurança/qualidade:
+- seleção formal concluída (`artifacts/model_selection.json`)
+- gates de qualidade compatíveis com a política (`Recall` primária + `PR-AUC` mínima)
+- `src.regression_check` sem `FAIL`
+- decisão humana explícita em caso de `WARNING` (com justificativa)
+
+Se o campeão atual continuar melhor/mais seguro:
+- manter versão atual em produção e registrar a decisão (sem promover o novo candidato)
+
+### 9) Rollback após promoção (quando necessário)
+
+Executar rollback se houver:
+- regressão operacional após promoção (ex.: comportamento anômalo de `positive_rate`, erros recorrentes, incompatibilidade prática)
+- indisponibilidade de artefato/serving após troca
+- evidência rápida de piora após validação de sanidade
+
+Procedimento resumido:
+- restaurar release/backup anterior (`app/model/backups` ou `artifacts/models/releases/*`)
+- reiniciar API
+- validar `/health`, `/version` e `/predict`
+- retomar monitoramento online e registrar incidente/decisão
+
+Detalhes de rollback:
+- `docs/pipeline_ml_deep_dives.md` (atualização do modelo na API e rollback)
+
+### 10) Limitações da estratégia atual (escopo do projeto)
+
+- O `ground truth` chega com atraso, então a decisão mais confiável depende de avaliação offline posterior.
+- A avaliação em produção é simulada por replay local (`src.offline_evaluation`), sem join de IDs de produção (decisão de privacidade operacional).
+- Não há automação de retreino com scheduler/gatilho automático nesta entrega.
+  - A automação está registrada como backlog na `Fase 9`.
+
+Referências rápidas:
+- `Ciclo de Vida em Produção (Operação do Modelo)`
+- `Mensuração em Produção (Ground Truth Delay) (Fase 7)`
+- `Drift (Evidently) (Fase 7)`
+- `Não-regressão do Modelo (Fase 7)`
+- seções de promoção/versionamento do pipeline e `docs/pipeline_ml_deep_dives.md`
 
 ## 📁 Estrutura do Projeto
 
@@ -1970,7 +2186,7 @@ Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 Progresso geral (barra visual):
 `[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜]`
 
-`108 de 113 tarefas concluídas (95.6%)`
+`109 de 113 tarefas concluídas (96.5%)`
 
 | Fase | Progresso |
 |---|---|
@@ -1981,8 +2197,8 @@ Progresso geral (barra visual):
 | Fase 5 - Pipeline, Treinamento e Avaliação | 17/17 |
 | Fase 6 - Artefatos, API e Deploy | 16/16 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 13/13 |
-| Fase 8 - Documentação e Entrega Final | 18/23 |
-| Total | 108/113 |
+| Fase 8 - Documentação e Entrega Final | 19/23 |
+| Total | 109/113 |
 
 Nota:
 - A `Fase 9` é opcional e fica fora da contagem oficial de progresso (`barra`, `X/Y` e `%`).
@@ -2104,7 +2320,7 @@ Nota de shift temporal:
 - [x] Implementar relatório de drift com Evidently
 - [x] Criar aplicação Streamlit para visualização do relatório de drift
 
-### Fase 8 - Documentação e Entrega Final [18/23]
+### Fase 8 - Documentação e Entrega Final [19/23]
 - [x] Documentar visão geral do problema e objetivo
 - [x] Documentar stack tecnológica
 - [x] Adicionar versionamento/changelog dos contratos (`docs/contracts`)
@@ -2112,7 +2328,7 @@ Nota de shift temporal:
 - [x] Documentar etapas do pipeline de Machine Learning
 - [x] Documentar ciclo de vida em produção: entrada de alunos novos, validação de contrato, inferência, logging, drift, retreino, promoção/rollback
 - [x] Documentar explicitamente contratos em produção (data contracts + contrato de payload da API + contrato de saída)
-- [ ] Documentar estratégia de retreino (gatilhos por tempo e/ou por drift, e como executar)
+- [x] Documentar estratégia de retreino (gatilhos por tempo e/ou por drift, e como executar)
 - [ ] Documentar limitações conhecidas do modelo e riscos assumidos (parcial: incluída limitação semântica `Idade x Fase_Ideal`)
 - [ ] Documentar exemplos de chamadas à API
 - [x] Documentar setup de ambiente local com `.venv` e instalação de dependências
