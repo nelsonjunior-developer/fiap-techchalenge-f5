@@ -205,6 +205,84 @@ Resumo atual do dataset:
 python -m src.contracts --export
 ```
 
+## Stack Tecnológica
+
+### 1) Linguagem e runtime
+- Linguagem principal: `Python 3.11.x`
+- Versão recomendada local: `Python 3.11.9` (ver `.python-version`)
+- Alinhamento de runtime:
+  - Docker: `python:3.11-slim` (`Dockerfile`)
+  - CI: `Python 3.11` (`.github/workflows/ci.yml`)
+- Ambientes locais:
+  - `.venv`: treino, API, CLIs e testes
+  - `.venv-dashboard`: stack isolada para drift/dashboard (`Evidently + Streamlit`)
+
+### 2) Bibliotecas principais (por área)
+
+#### A) Dados e Machine Learning
+- `pandas`, `numpy`
+- `openpyxl` (leitura do dataset XLSX)
+- `scikit-learn`:
+  - `Pipeline`, `ColumnTransformer`
+  - modelos: `LogisticRegression`, `HistGradientBoostingClassifier`
+- `joblib` (serialização de artefatos do modelo)
+
+#### B) API / Serving
+- `FastAPI` (API de inferência)
+- `Uvicorn` (ASGI server)
+- `Pydantic` `v1.x` (validação de entrada/saída)
+
+#### C) Qualidade, testes e reprodutibilidade
+- `pytest`
+- `pytest-cov`
+- `logging` (stdlib) + logging estruturado JSON implementado no projeto (`src/utils.py`)
+
+#### D) Monitoramento / Drift / Dashboard
+- `Evidently` (relatório de drift em HTML, local)
+- `Streamlit` (visualização local do relatório HTML)
+- Observação: a stack de drift/dashboard roda em ambiente isolado (`.venv-dashboard`) para evitar conflitos de dependências (ex.: `protobuf`)
+
+### 3) Empacotamento, execução e automação
+- Docker:
+  - imagem base `python:3.11-slim`
+  - execução local da API via `uvicorn` dentro do container
+- Execução local (sem Docker):
+  - API com `uvicorn`
+  - CLIs de dados/ML em `src/*`
+- CI (GitHub Actions):
+  - `pytest` + coverage (`--cov-fail-under=80`)
+  - `python -m src.regression_check` (não-regressão do campeão, modo CI-friendly)
+  - `python -m src.validate --no-markdown --skip-dataset`
+  - `python -m src.cohort_stats --no-markdown --skip-dataset`
+- Workflow manual opcional:
+  - `Dashboard Smoke (Manual)` para validar `src.drift` + dashboard Streamlit no GitHub Actions
+
+### 4) Organização de artefatos e outputs
+- Serving (API):
+  - `app/model/model.joblib` + `app/model/metadata.json` (quando promovidos)
+- Referência de drift (gerada por rotina específica):
+  - `app/model/reference/reference_model_frame.csv`
+  - `app/model/reference/reference_meta.json`
+- Artefatos locais em `artifacts/`:
+  - relatórios (`.json`, `.md`, `.html`)
+  - versões de dataset (`artifacts/dataset_versions/*`)
+  - modelos experimentais/releases locais (`artifacts/models/*`)
+- Observação:
+  - `artifacts/` contém artefatos gerados; parte pode aparecer versionada no repositório como evidência/saída de referência, enquanto outputs operacionais do dia a dia são locais e sujeitos à política de retenção (`python -m src.retention`)
+
+### 5) Arquivos de dependências e configuração da stack
+- `requirements.txt`: runtime principal (API + pipeline base)
+- `requirements-dev.txt`: testes, coverage e ferramentas de desenvolvimento (inclui `Evidently` para drift local)
+- `requirements-dashboard.txt`: stack isolada do dashboard (`Evidently + Streamlit`)
+- `Dockerfile`: empacotamento da API
+- `.github/workflows/ci.yml`: automação de CI
+- `.python-version`: versão recomendada para ambiente local (`pyenv`)
+
+### 6) Nota de privacidade operacional
+- Campos sensíveis como `RA`, `Nome_Anon` e `Avaliador1..Avaliador6` não são usados como features do modelo.
+- Logs e monitoramento em produção/local usam apenas agregados (contagens, taxas e histogramas), sem payload raw, sem listas de IDs e sem probabilidades individuais por aluno.
+- O monitoramento de drift opera sobre `MODEL frame` (sem PII), e os guardrails de privacidade/redaction estão centralizados no código (`src/privacy.py` + `src/utils.py`).
+
 ## 📁 Estrutura do Projeto
 
 O repositório é organizado para separar claramente ingestão e tratamento de dados, treinamento do modelo, disponibilização via API, monitoramento e testes, garantindo manutenibilidade, reprodutibilidade e facilidade de deploy.
@@ -1496,9 +1574,9 @@ Este checklist foi elaborado considerando explicitamente as inconsistências rea
 Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 
 Progresso geral (barra visual):
-`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜]`
+`[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜]`
 
-`103 de 113 tarefas concluídas (91.2%)`
+`104 de 113 tarefas concluídas (92.0%)`
 
 | Fase | Progresso |
 |---|---|
@@ -1509,8 +1587,8 @@ Progresso geral (barra visual):
 | Fase 5 - Pipeline, Treinamento e Avaliação | 17/17 |
 | Fase 6 - Artefatos, API e Deploy | 16/16 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 13/13 |
-| Fase 8 - Documentação e Entrega Final | 13/23 |
-| Total | 103/113 |
+| Fase 8 - Documentação e Entrega Final | 14/23 |
+| Total | 104/113 |
 
 Nota:
 - A `Fase 9` é opcional e fica fora da contagem oficial de progresso (`barra`, `X/Y` e `%`).
@@ -1629,9 +1707,9 @@ Nota de shift temporal:
 - [x] Implementar relatório de drift com Evidently
 - [x] Criar aplicação Streamlit para visualização do relatório de drift
 
-### Fase 8 - Documentação e Entrega Final [13/23]
+### Fase 8 - Documentação e Entrega Final [14/23]
 - [x] Documentar visão geral do problema e objetivo
-- [ ] Documentar stack tecnológica
+- [x] Documentar stack tecnológica
 - [ ] Adicionar versionamento/changelog dos contratos (`docs/contracts`)
 - [x] Documentar estrutura do projeto
 - [ ] Documentar etapas do pipeline de Machine Learning
