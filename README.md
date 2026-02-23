@@ -73,8 +73,8 @@ O modelo continua com caráter preditivo de apoio à decisão humana: não é ca
 
 ## Como Navegar Este README
 
-- Leitura rápida (banca/gestão): `Visão Geral`, `Target`, `Stack Tecnológica`, `Etapas do Pipeline`, `CI` e `Checklist`.
-- Leitura técnica (engenharia/ML): `Dados e Ingestão`, `Data Contract`, `Etapas do Pipeline` e os blocos detalhados (Fases 4 a 7), que estão em seções colapsáveis.
+- Leitura rápida (banca/gestão): `Visão Geral`, `Target`, `Stack Tecnológica`, `Etapas do Pipeline`, `Ciclo de Vida em Produção`, `CI` e `Checklist`.
+- Leitura técnica (engenharia/ML): `Dados e Ingestão`, `Data Contract`, `Contratos em Produção`, `Etapas do Pipeline` e os blocos detalhados (Fases 4 a 7), que estão em seções colapsáveis.
 - Operação local: `Ambiente Local (.venv)`, `Rodar API Local`, `Docker`, `Drift (Evidently)` e `Dashboard de Drift (Streamlit)`.
 
 <details>
@@ -91,6 +91,9 @@ O modelo continua com caráter preditivo de apoio à decisão humana: não é ca
   - `Data Contract`
   - `Stack Tecnológica`
   - `Etapas do Pipeline de Machine Learning`
+- Operação em produção:
+  - `Ciclo de Vida em Produção (Operação do Modelo)`
+  - `Contratos em Produção (Dados + API + Saída)`
 - Setup e execução:
   - `Estrutura do Projeto`
   - `Ambiente Local (.venv)`
@@ -169,6 +172,7 @@ A análise detalhada do dicionário de dados e das bases `2022`, `2023` e `2024`
 - Nota semântica importante:
   - `Ano nasc` e `Data de Nasc` não são semanticamente idênticos (ano vs data completa). Nesta fase harmonizamos header e aplicamos uma normalização mínima de conteúdo para garantir tipo `datetime` e evitar quebra do pipeline. A interpretação semântica fina (ex.: precisão de data vs apenas ano) continua sendo uma limitação conhecida.
   - `Nome` e `Nome Anonimizado` são harmonizados para `Nome_Anon` apenas para alinhamento de schema; isso não garante anonimização no dado de 2022.
+  - `Fase_Ideal` tem ambiguidade semântica/operacional no dataset (ex.: estudantes da mesma idade com valores diferentes como `Fase 1` e `Fase Alfa` em 2024). Embora a regra de negócio informada pela professora seja "fase ideal = ano escolar esperado pela idade", o projeto **não recalcula nem corrige `Fase_Ideal` pela `Idade`** nesta versão; a coluna é tratada como sinal categórico fornecido pela base e essa inconsistência permanece como limitação conhecida até formalização de regra institucional (incluindo corte etário e mapeamento de casos como `Fase Alfa`).
 - Padronização de tipos após harmonização/alinhamento:
   - `Data_Nasc` é padronizada para `datetime` com desambiguação explícita:
     - valores numéricos em `1900..2100` são interpretados como ano (`YYYY-01-01`)
@@ -466,6 +470,362 @@ python -m src.temporal_shift
 - API/serving e payloads: ver seções de **API** / endpoints (`/predict`, `/health`, `/version`)
 - Drift e dashboard: ver **Drift (Evidently)** e **Dashboard de Drift (Streamlit)**
 - Retenção e limpeza local: ver **Retenção e Limpeza Local**
+
+## Ciclo de Vida em Produção (Operação do Modelo)
+
+Esta seção documenta o ciclo operacional do sistema em produção/local: da entrada de dados na API até monitoramento, mensuração pós-fato, retreino e promoção/rollback. O objetivo é mostrar o fluxo completo de operação sem repetir os detalhes já descritos nas seções específicas.
+
+Observação de governança:
+- O modelo é ferramenta de apoio à decisão humana (não substitui avaliação pedagógica/psicopedagógica).
+- O rótulo de negócio (`Defasagem_{t+1}`) chega com atraso, então o ciclo separa monitoramento **online** (sem rótulo) e avaliação **offline** (pós-fato).
+
+### 1) Visão geral do ciclo (entrada -> monitoramento -> melhoria)
+
+```text
+Payload de inferência
+  -> FastAPI (/predict) + validação do body (Pydantic/FastAPI)
+  -> validação de contrato raw + gate anti-leakage
+  -> (opcional) payload parcial para aluno novo -> NA -> imputação
+  -> pipeline de inferência (RAW -> MODEL -> preprocessor -> model)
+  -> resposta (risk_proba, risk_class, threshold, model_version)
+  -> logs estruturados + métricas online agregadas (sem PII)
+  -> monitoramento de drift/qualidade de entrada
+  -> chegada tardia do rótulo (t+1)
+  -> avaliação offline (Recall/PR-AUC etc.)
+  -> decisão operacional (manter / retreinar / promover / rollback)
+```
+
+### 2) Entrada em produção (incluindo alunos novos)
+
+- A entrada operacional ocorre via `POST /predict` (single, batch ou envelope com `records`).
+- O contrato base do payload usa `expected_raw_cols` do `metadata.json` do modelo em serving.
+- Modo padrão (`ALLOW_PARTIAL_PAYLOAD=0`):
+  - exige todas as colunas esperadas (`missing_columns` -> `400`)
+- Modo para alunos novos / histórico incompleto (`ALLOW_PARTIAL_PAYLOAD=1`):
+  - aceita payload parcial
+  - colunas faltantes são reindexadas com `pd.NA`
+  - imputação da pipeline (`SimpleImputer`) resolve missing (sem valores “mágicos”)
+- Mesmo em payload parcial:
+  - extras `leakage-like` continuam bloqueados (`target`, colunas futuras etc.)
+
+Referências:
+- seção `POST /predict`
+- subseção `Alunos novos (sem histórico)`
+
+### 3) Validação de contrato e respostas da API (visão operacional)
+
+| Status | Situação típica | Ação operacional recomendada |
+|---|---|---|
+| `200` | Inferência concluída com sucesso | Monitorar taxas/métricas agregadas; seguir operação |
+| `400` | Colunas faltantes, extras leakage-like, batch inválido | Corrigir payload/orquestração do cliente; revisar contrato raw |
+| `422` | Body/JSON inválido (Pydantic/FastAPI) | Corrigir formato do request; verificar integração cliente |
+| `503` | Modelo/metadata indisponíveis | Verificar `app/model/*`, promoção e restart da API |
+| `500` | Erro interno excepcional | Inspecionar logs estruturados, corrigir e rerodar |
+
+Notas importantes:
+- O `422` do `/predict` é sanitizado (sem eco de payload/`input` do Pydantic).
+- Respostas e logs não devem expor `RA`, IDs, payload raw ou probabilidades individuais.
+
+### 4) Inferência e decisão em runtime
+
+- A API reutiliza o mesmo caminho de treino:
+  - `RAW -> MODEL frame -> ColumnTransformer -> model`
+- A decisão de risco usa threshold operacional vindo do metadata de serving (`threshold_policy`), com fallback legado/default se necessário.
+- A saída da API inclui metadados de rastreabilidade:
+  - `risk_proba`, `risk_class`, `threshold_applied`, `model_version`, `model_family`, `variant`
+- Em indisponibilidade de artefatos (`model.joblib` / `metadata.json`):
+  - a API permanece saudável em `/health` e `/version`
+  - `/predict` retorna `503` com notas diagnósticas agregadas
+
+### 5) Logging e monitoramento online (sem rótulo)
+
+- Logs estruturados JSON (stdout por padrão) com `request_id`, eventos e contexto agregado:
+  - `src.utils.log_event(...)`
+- Métricas online agregadas por request/batch:
+  - `logs/online_metrics.jsonl`
+  - histograma de scores (`bins`)
+  - `positive_rate` no threshold operacional
+  - `missing_cols_rate` / `missing_values_rate`
+  - `status_family` (`2xx/4xx/5xx`)
+- Erros de validação também entram no monitoramento agregado:
+  - `400` (rota)
+  - `422` (handler global)
+- Política de privacidade operacional:
+  - sem `RA`, sem payload/records, sem listas de IDs, sem scores individuais
+
+Referências:
+- `Logging Estruturado (Fase 7)`
+- `Privacidade Operacional (Fase 7)`
+- `Mensuração em Produção (Ground Truth Delay) (Fase 7)`
+
+### 6) Drift e qualidade de entrada (monitoramento contínuo)
+
+- O monitoramento de drift opera em `MODEL frame` (sem PII), usando referência do modelo promovido:
+  - `app/model/reference/reference_model_frame.csv`
+  - `app/model/reference/reference_meta.json`
+- Relatório visual local com Evidently:
+  - `python -m src.drift`
+  - saída em `artifacts/drift_report.html` + `artifacts/drift_report_summary.json`
+- Visualização local:
+  - `streamlit run dashboards/streamlit_app.py`
+- Além de drift estatístico, monitorar sinais operacionais:
+  - explosão de `positive_rate`
+  - aumento de `missing_*_rate`
+  - crescimento de `4xx/422`
+
+Referências:
+- `Drift (Evidently) (Fase 7)`
+- `Dashboard de Drift (Streamlit) (Fase 7)`
+
+### 7) Mensuração offline quando o ground truth chega (`t+1`)
+
+- Como o rótulo chega com atraso, métricas oficiais (Recall/PR-AUC etc.) não são avaliadas no request online.
+- Quando dados de `t+1` chegam, o projeto roda avaliação pós-fato por replay local:
+  - `python -m src.offline_evaluation ...`
+- O fluxo offline:
+  - reconstrói coorte temporal
+  - reaplica o modelo (replay)
+  - calcula métricas oficiais agregadas
+- No contexto acadêmico/local, isso evita logar `RA` em produção e mantém privacidade operacional.
+
+Referência:
+- `Mensuração em Produção (Ground Truth Delay) (Fase 7)`
+
+### 8) Gatilhos operacionais (sinais -> ação recomendada)
+
+| Sinal observado | Interpretação possível | Ação recomendada |
+|---|---|---|
+| `positive_rate` muito acima/abaixo do padrão | mudança de distribuição de entrada / threshold descalibrado | investigar logs online e drift; revisar threshold/política |
+| `missing_cols_rate` / `missing_values_rate` altos | degradação de qualidade de payload | acionar time integrador; revisar contrato raw; usar `ALLOW_PARTIAL_PAYLOAD` só quando necessário |
+| `drift_report` em `WARNING/FAIL` | mudança de população/processo | investigar features com drift, comparar coortes e avaliar necessidade de retreino |
+| queda de `Recall` / `PR-AUC` no offline | degradação real de performance | iniciar ciclo de retreino + comparação + seleção |
+| `503` recorrente em `/predict` | problema de serving/promoção/artefato | validar `app/model/*`, promoção e restart; considerar rollback |
+
+Observação:
+- A estratégia formal de retreino (gatilhos/periodicidade) será detalhada em seção própria; aqui documentamos o ciclo operacional e os sinais práticos de ação.
+
+### 9) Retreino, promoção e rollback (runbook operacional resumido)
+
+Fluxo recomendado (alto nível):
+1. Monitoramento aponta necessidade de reavaliar (`drift`, métricas offline, prevalência, erro operacional).
+2. Executar ciclo offline de treino/avaliação/seleção:
+   - `train_baseline` / `train_hgb` / `compare_models` / `evaluate_holdout` / `model_selection`
+3. Validar gates e não-regressão (`src.regression_check` / `model_selection.status`)
+4. Promover para `staging`, validar, depois promover para `prod local`
+5. Reiniciar API (cache de modelo/metadata)
+6. Validar `/health`, `/version` e um `POST /predict` de sanidade
+7. Se houver regressão operacional, executar rollback por backup/release
+
+Detalhes completos de promoção/rollback:
+- `docs/pipeline_ml_deep_dives.md` (seção `Atualização do Modelo na API (Troca de Versão e Rollback) (Fase 6)`)
+
+### 10) Runbook resumido por cenário
+
+#### Cenário A: Operação normal (request de aluno novo)
+1. Receber request no `/predict`
+2. Se aluno novo/incompleto, habilitar `ALLOW_PARTIAL_PAYLOAD=1` conforme política operacional
+3. Verificar `200` + resposta com `risk_proba/risk_class`
+4. Monitorar `online_metrics.jsonl` (missing/positive_rate/status)
+
+#### Cenário B: Drift detectado / mudança de distribuição
+1. Gerar `drift_report.html` com `src.drift`
+2. Inspecionar `share_drifted_features` + features afetadas
+3. Confrontar sinais online (`positive_rate`, missing, erros)
+4. Planejar/acionar retreino se impacto for persistente
+
+#### Cenário C: Retreino e promoção
+1. Treinar candidatos e avaliar holdout temporal
+2. Selecionar campeão (`model_selection`)
+3. Promover (`staging -> prod`)
+4. Reiniciar API
+5. Validar `/version`, `/health`, `/predict`
+
+#### Cenário D: Rollback local
+1. Identificar backup/release anterior
+2. Restaurar `model.joblib` + `metadata.json`
+3. Reiniciar API
+4. Validar endpoints e retomar monitoramento
+
+## Contratos em Produção (Dados + API + Saída)
+
+Esta seção explicita os contratos usados em produção/local, separando claramente o que é contrato de dados (offline), contrato de entrada da API (online) e contrato de saída da API (consumo). O objetivo é evitar ambiguidade entre “schema do dataset”, “payload de inferência” e “resposta do modelo”.
+
+### 1) Mapa dos contratos (fonte de verdade e ponto de validação)
+
+| Contrato | Fonte de verdade | Onde é validado/aplicado | Natureza | Observações |
+|---|---|---|---|---|
+| Data contracts por ano (`2022/2023/2024`) | `docs/contracts/data_contract_*.json` + `src/contracts.py` | `src.contract_validate`, `src.validate`, fluxo de ingestão/qualidade | Estático por export | Focado em schema/qualidade do dataset (offline) |
+| Changelog/versionamento dos contratos | `docs/contracts/contracts_changelog.json` + `docs/contracts/CHANGELOG.md` | Geração via `python -m src.contracts --export` | Histórico documental | Resume mudanças estruturais por ano (colunas/tipos/regras) |
+| Contrato de payload da API (`POST /predict`) | `app/model/metadata.json` (`expected_raw_cols`) + regras de `app/routes.py` / `app/predict_utils.py` | Runtime do `/predict` | Dinâmico por modelo em serving | Mesma API pode exigir contratos diferentes conforme versão promovida |
+| Contrato de saída da API | `app/schemas.py` (`PredictionResult`, `PredictResponse`) | `response_model` da FastAPI + validação Pydantic | Estável (versionado por código) | Campos de rastreabilidade e decisão (`threshold`, `model_version`) |
+
+Observação de privacidade:
+- Em todas as camadas, contratos e monitoramento operam sem expor `RA`, listas de IDs, payload raw ou probabilidades individuais.
+
+### 2) Data contracts (dataset/ingestão offline)
+
+Os data contracts descrevem o contrato estrutural e de qualidade das bases anuais (`PEDE2022`, `PEDE2023`, `PEDE2024`) e servem como referência de governança na ingestão.
+
+O que os data contracts cobrem:
+- nomes de colunas esperadas (já harmonizadas/documentadas por ano)
+- tipo esperado (`dtype`) e observações de coerção
+- missingness/domínio em nível de auditoria (quando aplicável)
+- `presence` / `enforcement` (ex.: obrigatório, opcional, info)
+- marcação de colunas sensíveis/PII
+
+Arquivos principais:
+- `docs/contracts/data_contract_2022.json`
+- `docs/contracts/data_contract_2023.json`
+- `docs/contracts/data_contract_2024.json`
+- `docs/contracts/contracts_changelog.json`
+- `docs/contracts/CHANGELOG.md`
+
+Como atualizar/exportar:
+```bash
+python -m src.contracts --export
+```
+
+Limite importante (semântica vs estrutura):
+- O data contract valida principalmente **estrutura e qualidade observável** (schema, tipos, missing, domínio).
+- Nem toda regra de negócio institucional está formalizada no contrato (ex.: ambiguidade semântica `Idade x Fase_Ideal` registrada como limitação conhecida).
+
+Referências:
+- seção `Data Contract`
+- seção `Validação de Consistência`
+
+### 3) Contrato de payload da API (`POST /predict`)
+
+#### Fonte de verdade do contrato de entrada
+
+- A fonte de verdade do contrato de entrada em produção é o metadata do modelo em serving:
+  - `app/model/metadata.json`
+  - especialmente `expected_raw_cols`
+- Isso significa que o contrato de payload é **dinâmico por versão de modelo promovida**.
+
+#### Formatos aceitos de payload (estrutura HTTP)
+
+O endpoint aceita três formatos equivalentes (normalizados internamente):
+- registro único (objeto JSON)
+- lista de registros (`[{...}, {...}]`)
+- envelope com `records`: `{"records": [{...}, {...}]}`
+
+Observação:
+- a chave reservada `records` é aceita apenas no formato envelope (não dentro de um registro individual).
+
+#### Regras de validação/aceitação no runtime
+
+- Colunas faltantes em relação a `expected_raw_cols`:
+  - `ALLOW_PARTIAL_PAYLOAD=0` (default): `400` com `missing_columns`
+  - `ALLOW_PARTIAL_PAYLOAD=1`: permitido; colunas faltantes viram `pd.NA` e a imputação resolve
+- Colunas extras:
+  - extras comuns: toleradas (ignoradas ao reindexar para `expected_raw_cols`)
+  - extras `leakage-like` (ex.: `target`, campos futuros): bloqueadas com `400`
+- Limites operacionais:
+  - batch size máximo validado na rota (`400` se exceder)
+  - payload estrutural inválido cai em `422` (Pydantic/FastAPI)
+
+Importante:
+- `ALLOW_PARTIAL_PAYLOAD` **não altera o contrato base** (`expected_raw_cols`).
+- Ele altera apenas a **política de aceitação de colunas faltantes** para cenários como alunos novos (sem histórico completo).
+
+#### Status codes como violações/resultado do contrato de entrada
+
+| Status | Significado (contrato/serving) | Exemplo de causa |
+|---|---|---|
+| `200` | Payload aceito + inferência concluída | Contrato estrutural válido e modelo disponível |
+| `400` | Violação de regra de entrada da rota | `missing_columns`, leakage-like extras, batch inválido |
+| `422` | Violação de schema HTTP/body (Pydantic/FastAPI) | body malformado / tipo inválido |
+| `503` | Contrato/modelo indisponível no serving | `metadata.json` ausente ou `model.joblib` indisponível |
+| `500` | Falha interna inesperada | erro interno de inferência/shape inválido |
+
+Privacidade no contrato de entrada:
+- logs e respostas não ecoam payload raw sensível
+- `422` do `/predict` é sanitizado (sem `input` do Pydantic)
+- não logar `RA`, listas de estudantes/IDs nem probabilidades individuais
+
+Referências:
+- seção `POST /predict`
+- subseção `Alunos novos (sem histórico)`
+- seção `Privacidade Operacional (Fase 7)`
+
+### 4) Contrato de saída da API (resposta de inferência)
+
+#### Fonte de verdade
+
+- `app/schemas.py`
+  - `PredictionResult` (linha por predição)
+  - `PredictResponse` (resposta batch)
+
+#### Estrutura de saída (alto nível)
+
+- `PredictResponse`
+  - `predictions`: lista de `PredictionResult`
+  - `count`: contagem de predições (deve bater com `len(predictions)`)
+  - `generated_at`: timestamp ISO8601
+- `PredictionResult`
+  - `risk_proba` (`[0,1]`)
+  - `risk_class` (`0|1`, derivada de `risk_proba >= threshold_applied`)
+  - `threshold_applied`
+  - `model_version`, `model_family`, `variant`
+  - `decision_policy`
+  - `notes` (opcional)
+
+Semântica operacional importante:
+- `threshold_applied` é resolvido a partir do metadata (com fallback compatível para metadata legado).
+- `risk_class` é validada como derivada de `risk_proba` e `threshold_applied`.
+- `notes` é campo auxiliar para contexto operacional (ex.: fallback de metadata, resumo de missing agregado), sem PII.
+
+#### Compatibilidade e evolução (saída)
+
+Princípios de compatibilidade:
+- evitar breaking changes no schema de resposta já consumido por clientes
+- preferir extensões por:
+  - novos campos opcionais, ou
+  - `notes` (quando o conteúdo for apenas diagnóstico textual)
+- mudanças de threshold/política de decisão impactam comportamento do modelo, mas não necessariamente o schema JSON
+
+### 5) Política de mudança e compatibilidade entre contratos
+
+#### O que tende a ser breaking vs non-breaking
+
+- Data contract (offline):
+  - mudança de nome/semântica de coluna relevante pode quebrar ingestão/validação e o pipeline de treino
+- Payload contract (online):
+  - mudar `expected_raw_cols` (metadata) pode quebrar clientes que montam payloads fixos
+  - habilitar `ALLOW_PARTIAL_PAYLOAD=1` é mudança de política de aceitação (mais permissiva), não de contrato base
+- Output contract (online):
+  - adicionar campo opcional tende a ser non-breaking
+  - remover/renomear campos obrigatórios é breaking
+
+#### Como o projeto comunica/rastreia mudanças
+
+- Data contracts e histórico:
+  - `docs/contracts/contracts_changelog.json`
+  - `docs/contracts/CHANGELOG.md`
+- Metadata do modelo em serving:
+  - `model_version`, `model_family`, `variant`, `threshold_policy`
+- README + PRs:
+  - documentação de mudanças operacionais e decisões de compatibilidade
+
+### 6) Relação entre os contratos (camadas complementares)
+
+- `Data contract` (offline):
+  - garante governança e qualidade do dataset de origem
+- `Payload contract` (online):
+  - garante que a API receba um payload compatível com o modelo em serving
+- `Output contract` (online):
+  - garante estabilidade de consumo e rastreabilidade da inferência
+
+Esses contratos coexistem e têm escopos diferentes:
+- o contrato de dados não substitui o contrato da API
+- o contrato da API não substitui a governança offline do dataset
+- o contrato de saída não garante qualidade de entrada, apenas consistência da resposta
+
+Referências rápidas:
+- `Data Contract`
+- `POST /predict`
+- `Schema Formal de Saída do Modelo/API`
+- `Ciclo de Vida em Produção (Operação do Modelo)`
 
 ## 📁 Estrutura do Projeto
 
@@ -1610,7 +1970,7 @@ Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 Progresso geral (barra visual):
 `[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜]`
 
-`106 de 113 tarefas concluídas (93.8%)`
+`108 de 113 tarefas concluídas (95.6%)`
 
 | Fase | Progresso |
 |---|---|
@@ -1621,8 +1981,8 @@ Progresso geral (barra visual):
 | Fase 5 - Pipeline, Treinamento e Avaliação | 17/17 |
 | Fase 6 - Artefatos, API e Deploy | 16/16 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 13/13 |
-| Fase 8 - Documentação e Entrega Final | 16/23 |
-| Total | 106/113 |
+| Fase 8 - Documentação e Entrega Final | 18/23 |
+| Total | 108/113 |
 
 Nota:
 - A `Fase 9` é opcional e fica fora da contagem oficial de progresso (`barra`, `X/Y` e `%`).
@@ -1744,16 +2104,16 @@ Nota de shift temporal:
 - [x] Implementar relatório de drift com Evidently
 - [x] Criar aplicação Streamlit para visualização do relatório de drift
 
-### Fase 8 - Documentação e Entrega Final [16/23]
+### Fase 8 - Documentação e Entrega Final [18/23]
 - [x] Documentar visão geral do problema e objetivo
 - [x] Documentar stack tecnológica
 - [x] Adicionar versionamento/changelog dos contratos (`docs/contracts`)
 - [x] Documentar estrutura do projeto
 - [x] Documentar etapas do pipeline de Machine Learning
-- [ ] Documentar ciclo de vida em produção: entrada de alunos novos, validação de contrato, inferência, logging, drift, retreino, promoção/rollback
-- [ ] Documentar explicitamente contratos em produção (data contracts + contrato de payload da API + contrato de saída)
+- [x] Documentar ciclo de vida em produção: entrada de alunos novos, validação de contrato, inferência, logging, drift, retreino, promoção/rollback
+- [x] Documentar explicitamente contratos em produção (data contracts + contrato de payload da API + contrato de saída)
 - [ ] Documentar estratégia de retreino (gatilhos por tempo e/ou por drift, e como executar)
-- [ ] Documentar limitações conhecidas do modelo e riscos assumidos
+- [ ] Documentar limitações conhecidas do modelo e riscos assumidos (parcial: incluída limitação semântica `Idade x Fase_Ideal`)
 - [ ] Documentar exemplos de chamadas à API
 - [x] Documentar setup de ambiente local com `.venv` e instalação de dependências
 - [x] Publicar código organizado no GitHub (PR `#1` aberta via GitHub CLI)
