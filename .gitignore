@@ -41,6 +41,8 @@ artifacts/*
 !artifacts/.gitkeep
 app/model/model.joblib
 app/model/metadata.json
+app/model/staging/
+app/model/promoted_model.json
 app/model/backups/
 app/model/reference/reference_model_frame.csv
 app/model/reference/reference_profile.json
