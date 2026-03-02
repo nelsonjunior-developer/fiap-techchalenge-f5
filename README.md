@@ -1166,7 +1166,7 @@ Princípios de leitura:
 | Coorte por interseção de `RA` | Pares temporais usam apenas estudantes presentes em `t` e `t+1` | Possível viés de cobertura (entradas tardias/saídas/evasão não rotulada) | Regra de coorte é explícita e auditada (`cohort_stats`); limitação reconhecida | Alta | Mitigada por governança |
 | Payload parcial (alunos novos) | `ALLOW_PARTIAL_PAYLOAD=1` permite inferência com colunas faltantes imputadas | Pode reduzir qualidade da inferência em casos muito incompletos | Flag default `0`; logging agregado de missing; imputação sem valores “mágicos”; uso controlado | Média | Mitigada por guardrails |
 | Drift monitorado localmente | Relatórios de drift e dashboard são locais (sem alertas automáticos contínuos) | Dependência de rotina manual de observação | `src.drift`, summary JSON, dashboard Streamlit e workflow smoke manual | Média | Parcialmente mitigada |
-| Infra/escopo operacional | Sem teste de carga e sem HA/escala de produção | Risco operacional fora do escopo acadêmico/local | API local com health/version, Docker e logs estruturados; limitação documentada | Baixa (no escopo atual) | Aceita por escopo |
+| Infra/escopo operacional | Apenas testes de carga básicos (sem HA/escala de produção) | Risco operacional parcial fora do escopo acadêmico/local | Testes básicos de carga da inferência (`tests/test_api_load_basic.py`), API local com health/version, Docker e logs estruturados | Baixa (no escopo atual) | Parcialmente mitigada |
 
 ### 2) Riscos assumidos (trade-offs do desenho)
 
@@ -1204,11 +1204,11 @@ Limitações estruturais (não resolvidas apenas com engenharia local):
 
 ### 5) Relação com roadmap / redução de risco futura
 
-Itens já identificados para reduzir risco em evoluções futuras (Fase 9 / backlog):
+Itens já identificados para reduzir risco em evoluções futuras (Fase 9 / backlog opcional, já implementados nesta entrega):
 - automação de retreino com gatilho por tempo + drift
 - dashboard operacional consolidado (inferência + drift + métricas pós-fato)
 - explainability local do campeão (importâncias globais/análise de erro agregada)
-- testes de carga básicos para API
+- testes de carga básicos para API de inferência
 
 Referências rápidas:
 - `Contratos em Produção (Dados + API + Saída)`
@@ -1531,6 +1531,27 @@ REQUIRE_PREDICT_200=1 scripts/smoke_api_local.sh
 Quando usar `REQUIRE_PREDICT_200=1`:
 - após confirmar que a API está com modelo/metadata carregados
 - e após adaptar/validar payload compatível com `expected_raw_cols`
+
+### 3.1) Testes de carga básicos da inferência (pytest)
+
+O projeto inclui testes de carga básicos (sem dependência de rede externa) em:
+- `tests/test_api_load_basic.py`
+
+Cenários cobertos:
+- carga sequencial de requests pequenos (`batch_size=1`)
+- carga no limite de batch da API (`batch_size=500`)
+
+Como executar apenas esses testes:
+
+```bash
+source .venv/bin/activate
+pytest -q tests/test_api_load_basic.py
+```
+
+Métricas verificadas nos testes:
+- latência de p95 (limite generoso para CI)
+- throughput mínimo (`requests/s` ou `records/s`)
+- estabilidade funcional (`status_code=200` e contagem correta no retorno)
 
 ### 4) Como interpretar o resultado (sem modelo vs com modelo)
 
@@ -2931,7 +2952,7 @@ Nota de shift temporal:
 - [x] Definir rotina de retreino automatizada com gatilho por tempo + gatilho por drift
 - [x] Hardenizar rotina de retreino automatizada (cobertura de testes dos fluxos `NOOP`/`RECOMMENDED`/`FAIL`/`PASS` e CLI)
 - [x] Publicar dashboard operacional consolidando inferência, drift e métricas pós-fato
-- [ ] Adicionar testes de carga básicos para API de inferência
+- [x] Adicionar testes de carga básicos para API de inferência
 - [x] Preparar pacote de evidências para banca (runbook + artefatos + checklist de auditoria) *(pacote local em `artifacts/evidence_pack/`; screenshots visuais ficam em `SCREENSHOTS_PENDENTES.md`)*
 
 </details>
