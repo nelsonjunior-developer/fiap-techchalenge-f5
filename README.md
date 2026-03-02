@@ -334,7 +334,7 @@ python -m src.contracts --export
 ### 5) Arquivos de dependências e configuração da stack
 - `requirements.txt`: runtime principal (API + pipeline base)
 - `requirements-dev.txt`: testes, coverage e ferramentas de desenvolvimento (inclui `Evidently` para drift local)
-- `requirements-dashboard.txt`: stack isolada do dashboard (`Evidently + Streamlit`)
+- `requirements-dashboard.txt`: stack isolada do dashboard (`Evidently + Streamlit + Playwright`)
 - `Dockerfile`: empacotamento da API
 - `.github/workflows/ci.yml`: automação de CI
 - `.python-version`: versão recomendada para ambiente local (`pyenv`)
@@ -2777,6 +2777,18 @@ Acesso local:
   - `python -m src.validate`
   - `python -m src.cohort_stats`
 
+## Evidências Visuais para Banca (Local)
+
+- As capturas de tela para apresentação estão em `artifacts/evidence_pack/screenshots/`.
+- Este README apenas referencia os arquivos; as imagens não são exibidas inline.
+- Mapeamento de uso (requisito -> screenshot): `docs/evidencias_banca.md`.
+- Arquivos principais:
+  - `artifacts/evidence_pack/screenshots/api_snapshot.png`
+  - `artifacts/evidence_pack/screenshots/drift_report_html.png`
+  - `artifacts/evidence_pack/screenshots/streamlit_drift_dashboard.png`
+  - `artifacts/evidence_pack/screenshots/streamlit_ops_dashboard.png`
+  - `artifacts/evidence_pack/screenshots/capture_manifest.json`
+
 </details>
 
 ## Checklist do Projeto - Datathon Machine Learning Engineering
@@ -2788,7 +2800,7 @@ Status: `TODO` | `DOING` | `DONE` | `BLOCKED`
 Progresso geral (barra visual):
 `[🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜]`
 
-`112 de 113 tarefas concluídas (99.1%)`
+`115 de 116 tarefas concluídas (99.1%)`
 
 | Fase | Progresso |
 |---|---|
@@ -2799,8 +2811,8 @@ Progresso geral (barra visual):
 | Fase 5 - Pipeline, Treinamento e Avaliação | 17/17 |
 | Fase 6 - Artefatos, API e Deploy | 16/16 |
 | Fase 7 - Testes, Monitoramento e Dashboard | 13/13 |
-| Fase 8 - Documentação e Entrega Final | 22/23 |
-| Total | 112/113 |
+| Fase 8 - Documentação e Entrega Final | 25/26 |
+| Total | 115/116 |
 
 Nota:
 - A `Fase 9` é opcional e fica fora da contagem oficial de progresso (`barra`, `X/Y` e `%`).
@@ -2922,7 +2934,7 @@ Nota de shift temporal:
 - [x] Implementar relatório de drift com Evidently
 - [x] Criar aplicação Streamlit para visualização do relatório de drift
 
-### Fase 8 - Documentação e Entrega Final [22/23]
+### Fase 8 - Documentação e Entrega Final [25/26]
 - [x] Documentar visão geral do problema e objetivo
 - [x] Documentar stack tecnológica
 - [x] Adicionar versionamento/changelog dos contratos (`docs/contracts`)
@@ -2939,6 +2951,9 @@ Nota de shift temporal:
 - [x] Commitar checklist, abrir PR de atualização, mesclar na `main` e limpar branch local (PR `#2` mesclada)
 - [x] Disponibilizar API acessível localmente
 - [ ] Gravar vídeo gerencial (<= 5 minutos) explicando a solução
+- [x] Registrar no README a localização das capturas de evidência para banca (sem embed das imagens) *(DOING -> DONE)*
+- [x] Criar `docs/evidencias_banca.md` com mapeamento `requisito -> screenshot esperado` (sem embed) *(DOING -> DONE)*
+- [x] Isolar `playwright` no `requirements-dashboard.txt` (remover de `requirements.txt`) para manter runtime da API enxuto *(DOING -> DONE)*
 - [x] Criar `agents.md` com convenções operacionais para agentes LLM
 - [x] Adicionar barra de progresso geral visual (`[🟩⬜...]`) no checklist
 - [x] Atualizar `agents.md` com regra explícita de manutenção da barra visual e da contagem geral
