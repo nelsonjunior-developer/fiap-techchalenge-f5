@@ -75,7 +75,7 @@ O modelo continua com caráter preditivo de apoio à decisão humana: não é ca
 
 - Leitura rápida (banca/gestão): `Visão Geral`, `Target`, `Stack Tecnológica`, `Etapas do Pipeline`, `Ciclo de Vida em Produção`, `Contratos em Produção`, `Estratégia de Retreino`, `Retreino Automatizado (Tempo + Drift)`, `Explainability Local do Campeão`, `Limitações Conhecidas e Riscos Assumidos`, `Exemplos de Chamadas à API`, `API Acessível Localmente`, `CI` e `Checklist`.
 - Leitura técnica (engenharia/ML): `Dados e Ingestão`, `Data Contract`, `Contratos em Produção`, `Estratégia de Retreino`, `Retreino Automatizado (Tempo + Drift)`, `Explainability Local do Campeão`, `Limitações Conhecidas e Riscos Assumidos`, `Exemplos de Chamadas à API`, `API Acessível Localmente`, `Etapas do Pipeline` e os blocos detalhados (Fases 4 a 7), que estão em seções colapsáveis.
-- Operação local: `Ambiente Local (.venv)`, `Rodar API Local`, `Exemplos de Chamadas à API`, `API Acessível Localmente`, `Docker`, `Drift (Evidently)` e `Dashboard de Drift (Streamlit)`.
+- Operação local: `Ambiente Local (.venv)`, `Rodar API Local`, `Exemplos de Chamadas à API`, `API Acessível Localmente`, `Docker`, `Drift (Evidently)`, `Dashboard de Drift (Streamlit)` e `Dashboard Operacional Consolidado (Streamlit)`.
 
 <details>
 <summary>Sumário de navegação (expandir)</summary>
@@ -113,6 +113,7 @@ O modelo continua com caráter preditivo de apoio à decisão humana: não é ca
   - `Privacidade Operacional`
   - `Drift (Evidently)`
   - `Dashboard de Drift (Streamlit)`
+  - `Dashboard Operacional Consolidado (Streamlit)`
   - `CI (GitHub Actions)`
 - Governança de execução:
   - `Checklist do Projeto - Datathon Machine Learning Engineering`
@@ -574,6 +575,7 @@ Referências:
   - saída em `artifacts/drift_report.html` + `artifacts/drift_report_summary.json`
 - Visualização local:
   - `streamlit run dashboards/streamlit_app.py`
+  - `streamlit run dashboards/ops_dashboard.py` (consolidado: online + drift + offline)
 - Além de drift estatístico, monitorar sinais operacionais:
   - explosão de `positive_rate`
   - aumento de `missing_*_rate`
@@ -582,6 +584,7 @@ Referências:
 Referências:
 - `Drift (Evidently) (Fase 7)`
 - `Dashboard de Drift (Streamlit) (Fase 7)`
+- `Dashboard Operacional Consolidado (Streamlit) (Fase 8/9)`
 
 ### 7) Mensuração offline quando o ground truth chega (`t+1`)
 
@@ -1739,8 +1742,9 @@ Recomendação de ambiente:
 ```bash
 scripts/bootstrap_dashboard_env.sh
 source .venv-dashboard/bin/activate
-# quando a app Streamlit estiver implementada:
+# dashboards disponíveis:
 streamlit run dashboards/streamlit_app.py
+streamlit run dashboards/ops_dashboard.py
 ```
 
 Esse script instala `requirements-dashboard.txt` em uma venv separada (`.venv-dashboard` por padrão), preservando o ambiente principal (`.venv`) da API/treino/CI.
@@ -2675,53 +2679,69 @@ Observações:
 - A geração automática de `current_csv` a partir do dataset XLSX (modo simulado local) fica fora do escopo desta tarefa; o CLI atual recebe `--current-csv`.
 - O relatório opera apenas em **MODEL frame**, preservando privacidade operacional (sem `RA`, sem nomes, sem payload da API).
 
-### Dashboard de Drift (Streamlit) (Fase 7)
+### Dashboards Streamlit (Drift + Operacional Consolidado)
 
-Aplicação local (read-only) para visualizar:
+Ambos os dashboards são locais (`read-only`, sem cloud) e exibem apenas agregados.
 
-- `artifacts/drift_report.html` (Evidently HTML)
-- `artifacts/drift_report_summary.json` (resumo agregado, quando existir)
-
-Pré-requisito:
-
-1. Gerar o relatório de drift:
-
-```bash
-python -m src.drift \
-  --reference-dir app/model/reference \
-  --current-csv <caminho_para_current_model_frame.csv> \
-  --out-html artifacts/drift_report.html \
-  --out-json artifacts/drift_report_summary.json
-```
-
-2. Usar a venv isolada de dashboard (recomendado para evitar conflito `protobuf` entre `Streamlit` e `Evidently`):
+Pré-requisito comum:
 
 ```bash
 scripts/bootstrap_dashboard_env.sh
 source .venv-dashboard/bin/activate
 ```
 
-Como rodar o dashboard:
+#### A) Dashboard de Drift (Fase 7)
+
+Entradas:
+- `artifacts/drift_report.html`
+- `artifacts/drift_report_summary.json` (opcional)
+
+Execução:
 
 ```bash
 streamlit run dashboards/streamlit_app.py
 ```
 
-Acessar no navegador:
+Uso:
+- foco em inspeção visual do relatório Evidently HTML;
+- path de HTML/summary configurável na sidebar;
+- upload opcional de HTML alternativo (`.html`).
 
+#### B) Dashboard Operacional Consolidado (Fase 8/9)
+
+Entradas (padrão):
+- online inference: `logs/online_metrics.jsonl`
+- drift: `artifacts/drift_report.html` + `artifacts/drift_report_summary.json`
+- pós-fato/offline: `artifacts/offline_metrics_*.json`
+
+Execução:
+
+```bash
+streamlit run dashboards/ops_dashboard.py
+```
+
+Abas:
+- `Online Inference`:
+  - `n_events`, `n_records_total`, `positive_rate_avg` (ponderada por `n_records`)
+  - `error_rate`, `validation_error_rate`, `model_unavailable_rate`
+  - séries temporais de `positive_rate` e `error_rate`
+  - histograma agregado de scores (quando `score_histogram` existir no JSONL)
+- `Drift`:
+  - resumo agregado (`status`, `share_drifted_features`, `drifted_features_count`)
+  - embed do `drift_report.html`
+- `Métricas Pós-Fato (Offline)`:
+  - seleção de arquivo `offline_metrics_*.json`
+  - `Recall`, `PR-AUC`, `Precision`, `F1`, `ROC-AUC`, `prevalence`, `matriz de confusão`
+- `Runbook`:
+  - comandos úteis para gerar drift, offline metrics, retenção e dry-run de retreino.
+
+Privacidade:
+- não carrega XLSX do dataset;
+- não exibe payload/records/IDs/scores individuais;
+- apenas agregados e artefatos já sanitizados.
+
+Acesso local:
 - `http://localhost:8501`
-
-Funcionalidades:
-
-- path configurável do HTML (`artifacts/drift_report.html` por padrão)
-- path configurável do summary (`artifacts/drift_report_summary.json` por padrão)
-- upload opcional de HTML alternativo (`.html`) sem sobrescrever arquivos locais
-- exibição apenas de agregados (status, contagens, taxas, métricas de drift)
-
-Observação:
-
-- uso local apenas (sem cloud, sem autenticação)
-- não exibe tabelas do MODEL frame nem payload raw
 
 ### CI (GitHub Actions) (Fase 7)
 
@@ -2910,7 +2930,7 @@ Nota de shift temporal:
 - [x] Implementar explainability local do campeão (ex.: importâncias globais e análise de erro agregada)
 - [x] Definir rotina de retreino automatizada com gatilho por tempo + gatilho por drift
 - [x] Hardenizar rotina de retreino automatizada (cobertura de testes dos fluxos `NOOP`/`RECOMMENDED`/`FAIL`/`PASS` e CLI)
-- [ ] Publicar dashboard operacional consolidando inferência, drift e métricas pós-fato
+- [x] Publicar dashboard operacional consolidando inferência, drift e métricas pós-fato
 - [ ] Adicionar testes de carga básicos para API de inferência
 - [x] Preparar pacote de evidências para banca (runbook + artefatos + checklist de auditoria) *(pacote local em `artifacts/evidence_pack/`; screenshots visuais ficam em `SCREENSHOTS_PENDENTES.md`)*
 
