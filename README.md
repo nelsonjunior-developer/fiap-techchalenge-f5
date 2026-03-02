@@ -73,8 +73,8 @@ O modelo continua com caráter preditivo de apoio à decisão humana: não é ca
 
 ## Como Navegar Este README
 
-- Leitura rápida (banca/gestão): `Visão Geral`, `Target`, `Stack Tecnológica`, `Etapas do Pipeline`, `Ciclo de Vida em Produção`, `Contratos em Produção`, `Estratégia de Retreino`, `Explainability Local do Campeão`, `Limitações Conhecidas e Riscos Assumidos`, `Exemplos de Chamadas à API`, `API Acessível Localmente`, `CI` e `Checklist`.
-- Leitura técnica (engenharia/ML): `Dados e Ingestão`, `Data Contract`, `Contratos em Produção`, `Estratégia de Retreino`, `Explainability Local do Campeão`, `Limitações Conhecidas e Riscos Assumidos`, `Exemplos de Chamadas à API`, `API Acessível Localmente`, `Etapas do Pipeline` e os blocos detalhados (Fases 4 a 7), que estão em seções colapsáveis.
+- Leitura rápida (banca/gestão): `Visão Geral`, `Target`, `Stack Tecnológica`, `Etapas do Pipeline`, `Ciclo de Vida em Produção`, `Contratos em Produção`, `Estratégia de Retreino`, `Retreino Automatizado (Tempo + Drift)`, `Explainability Local do Campeão`, `Limitações Conhecidas e Riscos Assumidos`, `Exemplos de Chamadas à API`, `API Acessível Localmente`, `CI` e `Checklist`.
+- Leitura técnica (engenharia/ML): `Dados e Ingestão`, `Data Contract`, `Contratos em Produção`, `Estratégia de Retreino`, `Retreino Automatizado (Tempo + Drift)`, `Explainability Local do Campeão`, `Limitações Conhecidas e Riscos Assumidos`, `Exemplos de Chamadas à API`, `API Acessível Localmente`, `Etapas do Pipeline` e os blocos detalhados (Fases 4 a 7), que estão em seções colapsáveis.
 - Operação local: `Ambiente Local (.venv)`, `Rodar API Local`, `Exemplos de Chamadas à API`, `API Acessível Localmente`, `Docker`, `Drift (Evidently)` e `Dashboard de Drift (Streamlit)`.
 
 <details>
@@ -95,6 +95,7 @@ O modelo continua com caráter preditivo de apoio à decisão humana: não é ca
   - `Ciclo de Vida em Produção (Operação do Modelo)`
   - `Contratos em Produção (Dados + API + Saída)`
   - `Estratégia de Retreino (Gatilhos + Execução)`
+  - `Retreino Automatizado (Tempo + Drift)`
   - `Explainability Local do Campeão`
   - `Limitações Conhecidas e Riscos Assumidos`
   - `Exemplos de Chamadas à API`
@@ -1046,6 +1047,64 @@ Referências rápidas:
 - `Drift (Evidently) (Fase 7)`
 - `Não-regressão do Modelo (Fase 7)`
 - seções de promoção/versionamento do pipeline e `docs/pipeline_ml_deep_dives.md`
+
+## Retreino Automatizado (Tempo + Drift)
+
+A rotina automatizada local de retreino está disponível via:
+
+```bash
+python -m src.retrain_orchestrator
+```
+
+Política (versionável):
+- arquivo: `docs/retrain_policy.json`
+- gatilhos default:
+  - tempo: `max_age_days=90` (base em `metadata.trained_at`)
+  - drift: `FAIL => required`, `WARNING => recommended`
+  - shift temporal: `FAIL => required`, `WARNING => recommended`
+
+Saídas:
+- `artifacts/retrain_decision.json` (sempre)
+- `artifacts/retrain_run.json` (quando `--execute 1`)
+- logs por etapa em `artifacts/retrain_logs/<run_id>/*.log`
+
+Modo dry-run (apenas decisão):
+
+```bash
+python -m src.retrain_orchestrator \
+  --policy docs/retrain_policy.json \
+  --drift-summary artifacts/drift_report_summary.json \
+  --shift-report artifacts/temporal_shift_report.json \
+  --execute 0
+```
+
+Modo execução end-to-end (treino -> seleção -> staging -> produção -> referência):
+
+```bash
+python -m src.retrain_orchestrator \
+  --dataset-path "dataset/DATATHON/BASE DE DADOS PEDE 2024 - DATATHON.xlsx" \
+  --policy docs/retrain_policy.json \
+  --execute 1 \
+  --allow-recommended 1 \
+  --allow-warning-promotion 1
+```
+
+Comportamento operacional:
+- `RETRAIN_REQUIRED`: executa quando `--execute 1`
+- `RETRAIN_RECOMMENDED`: executa somente com `--allow-recommended 1`
+- `NOOP`: não executa retreino
+
+Detalhes de robustez:
+- modo padrão isola execução em `artifacts/models/runs/<run_id>` para evitar contaminação por artefatos antigos;
+- em falha de qualquer etapa, o fluxo aborta e registra `failed_step` no manifesto;
+- o manifesto salva apenas `dataset_basename` (não registra path absoluto).
+
+Observação:
+- após promoção/rollback, reinicie a API para recarregar modelo/metadata em memória.
+
+Agendamento opcional (local):
+- Linux/macOS (cron): executar `src.retrain_orchestrator --execute 0` diariamente e `--execute 1` conforme política da operação.
+- Windows (Task Scheduler): configurar tarefa equivalente chamando `python -m src.retrain_orchestrator`.
 
 ## Explainability Local do Campeão
 
@@ -2849,7 +2908,8 @@ Nota de shift temporal:
 
 ### Fase 9 - Opcional (Backlog Futuro, fora da contagem oficial)
 - [x] Implementar explainability local do campeão (ex.: importâncias globais e análise de erro agregada)
-- [ ] Definir rotina de retreino automatizada com gatilho por tempo + gatilho por drift
+- [x] Definir rotina de retreino automatizada com gatilho por tempo + gatilho por drift
+- [x] Hardenizar rotina de retreino automatizada (cobertura de testes dos fluxos `NOOP`/`RECOMMENDED`/`FAIL`/`PASS` e CLI)
 - [ ] Publicar dashboard operacional consolidando inferência, drift e métricas pós-fato
 - [ ] Adicionar testes de carga básicos para API de inferência
 - [x] Preparar pacote de evidências para banca (runbook + artefatos + checklist de auditoria) *(pacote local em `artifacts/evidence_pack/`; screenshots visuais ficam em `SCREENSHOTS_PENDENTES.md`)*

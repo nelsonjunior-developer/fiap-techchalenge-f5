@@ -1,0 +1,19 @@
+{
+  "version": "1.0.0",
+  "time_trigger": {
+    "max_age_days": 90
+  },
+  "drift_trigger": {
+    "fail_status": "FAIL",
+    "warn_status": "WARNING"
+  },
+  "shift_trigger": {
+    "fail_status": "FAIL",
+    "warn_status": "WARNING"
+  },
+  "notes": [
+    "local-only orchestration; scheduling via cron or Task Scheduler is optional",
+    "required triggers execute retrain when --execute=1",
+    "recommended triggers execute only with --allow-recommended=1"
+  ]
+}
