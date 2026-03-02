@@ -73,8 +73,8 @@ O modelo continua com caráter preditivo de apoio à decisão humana: não é ca
 
 ## Como Navegar Este README
 
-- Leitura rápida (banca/gestão): `Visão Geral`, `Target`, `Stack Tecnológica`, `Etapas do Pipeline`, `Ciclo de Vida em Produção`, `Contratos em Produção`, `Estratégia de Retreino`, `Limitações Conhecidas e Riscos Assumidos`, `Exemplos de Chamadas à API`, `API Acessível Localmente`, `CI` e `Checklist`.
-- Leitura técnica (engenharia/ML): `Dados e Ingestão`, `Data Contract`, `Contratos em Produção`, `Estratégia de Retreino`, `Limitações Conhecidas e Riscos Assumidos`, `Exemplos de Chamadas à API`, `API Acessível Localmente`, `Etapas do Pipeline` e os blocos detalhados (Fases 4 a 7), que estão em seções colapsáveis.
+- Leitura rápida (banca/gestão): `Visão Geral`, `Target`, `Stack Tecnológica`, `Etapas do Pipeline`, `Ciclo de Vida em Produção`, `Contratos em Produção`, `Estratégia de Retreino`, `Explainability Local do Campeão`, `Limitações Conhecidas e Riscos Assumidos`, `Exemplos de Chamadas à API`, `API Acessível Localmente`, `CI` e `Checklist`.
+- Leitura técnica (engenharia/ML): `Dados e Ingestão`, `Data Contract`, `Contratos em Produção`, `Estratégia de Retreino`, `Explainability Local do Campeão`, `Limitações Conhecidas e Riscos Assumidos`, `Exemplos de Chamadas à API`, `API Acessível Localmente`, `Etapas do Pipeline` e os blocos detalhados (Fases 4 a 7), que estão em seções colapsáveis.
 - Operação local: `Ambiente Local (.venv)`, `Rodar API Local`, `Exemplos de Chamadas à API`, `API Acessível Localmente`, `Docker`, `Drift (Evidently)` e `Dashboard de Drift (Streamlit)`.
 
 <details>
@@ -95,6 +95,7 @@ O modelo continua com caráter preditivo de apoio à decisão humana: não é ca
   - `Ciclo de Vida em Produção (Operação do Modelo)`
   - `Contratos em Produção (Dados + API + Saída)`
   - `Estratégia de Retreino (Gatilhos + Execução)`
+  - `Explainability Local do Campeão`
   - `Limitações Conhecidas e Riscos Assumidos`
   - `Exemplos de Chamadas à API`
 - Setup e execução:
@@ -1045,6 +1046,43 @@ Referências rápidas:
 - `Drift (Evidently) (Fase 7)`
 - `Não-regressão do Modelo (Fase 7)`
 - seções de promoção/versionamento do pipeline e `docs/pipeline_ml_deep_dives.md`
+
+## Explainability Local do Campeão
+
+A explainability local é executada offline no holdout oficial (`2023->2024`) e gera:
+- importâncias globais de features (top-k);
+- análise de erro agregada por slices (sem registros individuais).
+
+CLI:
+
+```bash
+python -m src.explainability \
+  --model-dir app/model \
+  --dataset-path "dataset/DATATHON/BASE DE DADOS PEDE 2024 - DATATHON.xlsx" \
+  --year-t 2023 \
+  --year-t1 2024 \
+  --out-json artifacts/explainability_report.json \
+  --out-md artifacts/explainability_report.md \
+  --out-csv artifacts/feature_importance.csv \
+  --top-k 20 \
+  --max-rows 1000 \
+  --seed 42
+```
+
+Saídas:
+- `artifacts/explainability_report.json` (obrigatório)
+- `artifacts/explainability_report.md` (resumo humano)
+- `artifacts/feature_importance.csv` (opcional)
+
+Métodos de importância:
+- Modelos baseados em árvore com `feature_importances_`: usa importância nativa.
+- Modelos lineares com `coef_`: usa `abs(coef)`.
+- Fallback: `permutation_importance` (amostrado) quando o estimador não expõe importâncias nativas.
+
+Privacidade e governança:
+- sem `RA`, sem listas de IDs e sem registros individuais;
+- apenas agregados por grupo/score e top-k de nomes de features;
+- o relatório inclui nota explícita: importância global **não implica causalidade**.
 
 ## Limitações Conhecidas e Riscos Assumidos
 
@@ -2810,11 +2848,11 @@ Nota de shift temporal:
 - [x] Adicionar menção explícita de não-causalidade do modelo na seção de contexto de uso
 
 ### Fase 9 - Opcional (Backlog Futuro, fora da contagem oficial)
-- [ ] Implementar explainability local do campeão (ex.: importâncias globais e análise de erro agregada)
+- [x] Implementar explainability local do campeão (ex.: importâncias globais e análise de erro agregada)
 - [ ] Definir rotina de retreino automatizada com gatilho por tempo + gatilho por drift
 - [ ] Publicar dashboard operacional consolidando inferência, drift e métricas pós-fato
 - [ ] Adicionar testes de carga básicos para API de inferência
-- [ ] Preparar pacote de evidências para banca (runbook + artefatos + checklist de auditoria)
+- [x] Preparar pacote de evidências para banca (runbook + artefatos + checklist de auditoria) *(pacote local em `artifacts/evidence_pack/`; screenshots visuais ficam em `SCREENSHOTS_PENDENTES.md`)*
 
 </details>
 
