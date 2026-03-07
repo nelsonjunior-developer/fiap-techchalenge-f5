@@ -9,7 +9,12 @@ O foco da entrega é **engenharia de ML em produção local**:
 - observabilidade online (agregada, sem PII), monitoramento de drift e avaliação pós-fato;
 - retreino/promoção/rollback locais com rastreabilidade de artefatos.
 
-## Resumo Executivo (Leitura de 5 Minutos)
+EDA complementar:
+- Notebook: `notebooks/01_eda_datathon.ipynb`
+- Conteúdo: comparação estrutural entre `PEDE2022`, `PEDE2023` e `PEDE2024`, contagem de tokens inválidos de planilha, interseção de `RA` entre anos, definição do target temporal e evidência da limitação `Idade x Fase Ideal`.
+- Ideia principal: registrar de forma visual a análise exploratória que fundamentou as decisões de harmonização, contratos, coorte temporal e tratamento de qualidade do pipeline.
+
+## Resumo Executivo
 ### Problema e objetivo
 - Problema: classificação binária de risco de defasagem escolar futura.
 - Target oficial: `y = 1` se `Defasagem_{t+1} < 0`; caso contrário `y = 0`.
@@ -106,6 +111,8 @@ fiap-techchalenge-f5/
 │   ├── prometheus/                    # configuração de scrape local
 │   └── grafana/                       # datasource, dashboards e provisioning
 │
+├── notebooks/
+│   └── 01_eda_datathon.ipynb          # EDA executado com resultados persistidos
 ├── artifacts/                         # saídas geradas localmente (métricas, drift, evidências)
 ├── logs/                              # logs e métricas online agregadas
 ├── tests/                             # suíte unitária e integrada
@@ -286,28 +293,57 @@ curl -s http://127.0.0.1:8000/health
 curl -s http://127.0.0.1:8000/version
 ```
 
-### Predict (objeto único)
+### Gerar payload válido a partir do metadata do modelo
 ```bash
-curl -s -X POST http://127.0.0.1:8000/predict \
-  -H "Content-Type: application/json" \
-  -d '{"coluna_exemplo": 1}'
+python - <<'PY'
+import json
+from pathlib import Path
+
+meta = json.loads(Path("app/model/metadata.json").read_text(encoding="utf-8"))
+expected = [c for c in meta["expected_raw_cols"] if isinstance(c, str) and c.strip()]
+payload = {"records": [{col: None for col in expected}]}
+Path("/tmp/predict_payload.json").write_text(
+    json.dumps(payload, ensure_ascii=False),
+    encoding="utf-8",
+)
+print("payload salvo em /tmp/predict_payload.json")
+PY
 ```
 
-### Predict (envelope batch)
+### Predict (retorno 200)
 ```bash
 curl -s -X POST http://127.0.0.1:8000/predict \
   -H "Content-Type: application/json" \
-  -d '{"records":[{"coluna_exemplo":1},{"coluna_exemplo":2}]}'
+  --data-binary @/tmp/predict_payload.json
 ```
 
 ### Payload parcial para aluno novo
 ```bash
 ALLOW_PARTIAL_PAYLOAD=1 bash scripts/run_api_local.sh
+
+python - <<'PY'
+import json
+from pathlib import Path
+
+meta = json.loads(Path("app/model/metadata.json").read_text(encoding="utf-8"))
+expected = [c for c in meta["expected_raw_cols"] if isinstance(c, str) and c.strip()]
+partial_payload = {"records": [{expected[0]: None, expected[1]: None}]}
+Path("/tmp/predict_partial_payload.json").write_text(
+    json.dumps(partial_payload, ensure_ascii=False),
+    encoding="utf-8",
+)
+print("payload salvo em /tmp/predict_partial_payload.json")
+PY
+
+curl -s -X POST http://127.0.0.1:8000/predict \
+  -H "Content-Type: application/json" \
+  --data-binary @/tmp/predict_partial_payload.json
 ```
 
 Observação:
 - Esse modo depende das colunas esperadas no metadata do modelo.
 - Faltantes entram como `NA` e são tratados pelo pipeline de imputação.
+- Em uma resposta `200`, vale destacar `risk_proba`, `risk_class`, `threshold_applied` e `model_version`.
 
 ## Operação em Produção (Local)
 ### Logging estruturado e privacidade
@@ -432,6 +468,16 @@ Smoke automatizado:
 bash scripts/smoke_observability.sh
 ```
 
+Para popular os painéis do Grafana com tráfego recente:
+```bash
+bash scripts/populate_grafana_metrics.sh
+```
+
+Dicas:
+- aguarde 30 a 90 segundos após gerar tráfego;
+- use a janela `Last 15 minutes` no Grafana;
+- valide no Prometheus com a query `up{job="ml-api"}`.
+
 ## Qualidade e CI
 ### Testes locais
 ```bash
@@ -456,6 +502,7 @@ As evidências visuais estão mapeadas e prontas para uso em apresentação, **s
 - Mapeamento requisito -> screenshot: `docs/evidencias_banca.md`
 - Diretório esperado das capturas locais: `artifacts/evidence_pack/screenshots/`
 - Manifesto técnico da captura: `artifacts/evidence_pack/screenshots/capture_manifest.json`
+- Essas evidências são geradas localmente para apresentação; um clone limpo não deve presumir que elas já existem.
 
 ## Documentação Detalhada (Deep Dives)
 Para manter este README objetivo, os detalhes extensos ficam em `docs/`:
@@ -471,3 +518,4 @@ Para manter este README objetivo, os detalhes extensos ficam em `docs/`:
 - deep dive do pipeline: `docs/pipeline_ml_deep_dives.md`
 - justificativa do modelo final: `docs/model_final_justification.md`
 - política de retreino: `docs/retrain_policy.json`
+- EDA do projeto: notebook executado em `notebooks/01_eda_datathon.ipynb` e síntese técnica em `docs/analise_bases_e_dicionario.md`.
