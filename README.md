@@ -35,6 +35,85 @@ O foco da entrega é **engenharia de ML em produção local**:
 4. Verificar contrato e qualidade: `python -m src.validate`
 5. Verificar coorte temporal: `python -m src.cohort_stats`
 
+## Estrutura do Projeto
+```text
+fiap-techchalenge-f5/
+│
+├── README.md                          # visão executiva, arquitetura, operação e execução local
+├── rtr.md                             # roteiro da apresentação em vídeo
+├── requirements.txt                   # dependências principais da API e runtime
+├── requirements-dev.txt               # dependências de desenvolvimento e testes
+├── requirements-dashboard.txt         # ambiente isolado para Streamlit + Evidently
+├── docker-compose.observability.yml   # stack local de API + Prometheus + Grafana
+│
+├── app/
+│   ├── main.py                        # FastAPI app + middleware + handlers globais
+│   ├── routes.py                      # endpoints /health, /version, /predict, /metrics
+│   ├── deps.py                        # carregamento lazy de modelo/metadata e contexto
+│   ├── metrics.py                     # métricas Prometheus expostas em /metrics
+│   ├── request_schemas.py             # validação estrutural do body de /predict
+│   ├── schemas.py                     # contrato de saída da API
+│   ├── predict_utils.py               # missing stats e gate anti-leakage
+│   └── model/
+│       ├── model.joblib               # campeão atualmente servido
+│       ├── metadata.json              # versão, threshold e expected_raw_cols
+│       └── reference/                 # referência de drift do modelo promovido
+│
+├── src/
+│   ├── data.py                        # ingestão, harmonização e pares temporais
+│   ├── validate.py                    # qualidade dos dados e validação de consistência
+│   ├── contracts.py                   # export e versionamento de data contracts
+│   ├── contract_validate.py           # validação dos frames contra contratos
+│   ├── features.py                    # feature engineering RAW -> MODEL
+│   ├── preprocessing.py               # imputação, codificação e transformação sklearn
+│   ├── pipeline_components.py         # bundle reutilizável de pré-processamento/inferência
+│   ├── train_baseline.py              # treino baseline (LogisticRegression)
+│   ├── train_hgb.py                   # treino não linear (HistGradientBoosting)
+│   ├── model_selection.py             # escolha formal do campeão
+│   ├── promote_model.py               # staging/prod + backups de serving
+│   ├── build_reference_data.py        # geração da referência de drift
+│   ├── online_metrics.py              # métricas agregadas online
+│   ├── offline_evaluation.py          # avaliação pós-fato quando o rótulo chega
+│   ├── drift.py                       # relatório de drift com Evidently
+│   ├── regression_check.py            # não-regressão do campeão baseada em metadata
+│   ├── retention.py                   # limpeza local por TTL e keep-N
+│   ├── retrain_orchestrator.py        # decisão e execução de retreino
+│   ├── explainability.py              # importâncias globais + erro agregado
+│   └── privacy.py                     # guardrails anti-PII
+│
+├── dashboards/
+│   ├── streamlit_app.py               # visualização local do relatório de drift
+│   └── ops_dashboard.py               # dashboard operacional consolidado
+│
+├── docs/
+│   ├── analise_bases_e_dicionario.md  # leitura técnica das bases e dicionário
+│   ├── column_mapping.md              # crosswalk de schema entre anos
+│   ├── model_final_justification.md   # justificativa do campeão
+│   ├── pipeline_ml_deep_dives.md      # detalhes técnicos fora do README principal
+│   ├── retrain_policy.json            # política versionada de retreino
+│   ├── evidencias_banca.md            # mapa de screenshots/evidências
+│   └── contracts/                     # contratos versionados + changelog
+│
+├── scripts/
+│   ├── run_api_local.sh               # sobe a API local via .venv
+│   ├── smoke_api_local.sh             # smoke test da API local
+│   ├── run_api_docker_local.sh        # atalho Docker para API
+│   ├── bootstrap_dashboard_env.sh     # cria .venv-dashboard isolada
+│   ├── populate_grafana_metrics.sh    # gera tráfego para popular os painéis
+│   └── smoke_observability.sh         # smoke da stack Prometheus + Grafana
+│
+├── observability/
+│   ├── prometheus/                    # configuração de scrape local
+│   └── grafana/                       # datasource, dashboards e provisioning
+│
+├── artifacts/                         # saídas geradas localmente (métricas, drift, evidências)
+├── logs/                              # logs e métricas online agregadas
+├── tests/                             # suíte unitária e integrada
+├── dataset/                           # materiais e base original do desafio
+└── .github/
+    └── workflows/                    # CI principal + smokes manuais de dashboard/observability
+```
+
 ## Guia de Navegação
 | Se você quer... | Leia primeiro |
 |---|---|
@@ -364,46 +443,6 @@ pytest -q --cov=src --cov-report=term-missing --cov-fail-under=80
 - `ci.yml`: testes + coverage + checks de validação/coorte + regression check
 - `dashboard-smoke.yml` (manual): drift + Streamlit smoke
 - `observability-smoke.yml` (manual): API + Prometheus + Grafana smoke
-
-## Estrutura do Projeto
-```text
-app/
-  main.py                # FastAPI app + middleware + handlers
-  routes.py              # /health /version /predict /metrics
-  model/                 # modelo promovido (serving)
-
-dashboards/
-  streamlit_app.py       # visualização do relatório de drift
-  ops_dashboard.py       # dashboard operacional consolidado
-
-src/
-  data.py                # ingestão/harmonização
-  validate.py            # qualidade dos dados
-  contracts.py           # export de data contracts
-  train_baseline.py      # treino baseline
-  train_hgb.py           # treino não-linear
-  model_selection.py     # escolha do campeão
-  promote_model.py       # staging/prod + backups
-  online_metrics.py      # métricas agregadas online
-  offline_evaluation.py  # avaliação pós-fato
-  drift.py               # relatório de drift (Evidently)
-  retrain_orchestrator.py# gatilhos e execução de retreino
-  explainability.py      # importâncias globais + erro agregado
-  privacy.py             # guardrails anti-PII
-
-docs/
-  analise_bases_e_dicionario.md
-  pipeline_ml_deep_dives.md
-  contracts/
-  evidencias_banca.md
-
-scripts/
-  run_api_local.sh
-  smoke_api_local.sh
-  run_api_docker_local.sh
-  bootstrap_dashboard_env.sh
-  smoke_observability.sh
-```
 
 ## Limitações Conhecidas e Riscos Assumidos
 - `Fase_Ideal` apresenta inconsistências semânticas no dataset (ex.: idade igual com fases diferentes). Nesta versão, tratamos como categórica observada, sem recálculo por idade.
