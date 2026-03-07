@@ -14,6 +14,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.deps import METADATA_PATH, get_prediction_context, get_serving_metadata
+from app.metrics import now_perf_counter, observe_http_request, route_path_label
 from app.routes import router
 from src.online_metrics import append_online_event, summarize_online_batch
 from src.utils import (
@@ -63,16 +64,28 @@ async def _request_id_middleware(request: Request, call_next):
     request_id = uuid4().hex[:12]
     request.state.request_id = request_id
     token = set_request_id_context(request_id)
-    response = None
+    start = now_perf_counter()
+    status_code = 500
     try:
         response = await call_next(request)
+        status_code = int(getattr(response, "status_code", 500))
         try:
             response.headers["X-Request-ID"] = request_id
         except Exception:
             # Keep request processing resilient even if a custom response object misbehaves.
             pass
         return response
+    except Exception:
+        status_code = 500
+        raise
     finally:
+        duration = now_perf_counter() - start
+        observe_http_request(
+            method=request.method,
+            path=route_path_label(request),
+            status_code=int(status_code),
+            latency_seconds=duration,
+        )
         reset_request_id_context(token)
 
 

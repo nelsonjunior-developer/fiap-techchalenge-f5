@@ -1,0 +1,31 @@
+name: Observability Smoke (Manual)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  observability-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run observability smoke (compose up + probes)
+        run: |
+          KEEP_UP=1 bash scripts/smoke_observability.sh
+
+      - name: Collect logs and shutdown stack (always)
+        if: always()
+        run: |
+          docker compose -f docker-compose.observability.yml ps || true
+          docker compose -f docker-compose.observability.yml logs --no-color > observability-smoke.log || true
+          docker compose -f docker-compose.observability.yml down --remove-orphans || true
+
+      - name: Upload observability smoke logs (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: observability-smoke-logs
+          path: observability-smoke.log
+          if-no-files-found: warn

@@ -301,6 +301,8 @@ python -m src.contracts --export
 #### D) Monitoramento / Drift / Dashboard
 - `Evidently` (relatório de drift em HTML, local)
 - `Streamlit` (visualização local do relatório HTML)
+- `prometheus-client` (endpoint `/metrics` na API)
+- `Prometheus + Grafana` (observabilidade local opcional via `docker-compose.observability.yml`)
 - Observação: a stack de drift/dashboard roda em ambiente isolado (`.venv-dashboard`) para evitar conflitos de dependências (ex.: `protobuf`)
 
 ### 3) Empacotamento, execução e automação
@@ -2764,6 +2766,67 @@ Privacidade:
 Acesso local:
 - `http://localhost:8501`
 
+### Fase 9 (Opcional): Prometheus + Grafana (Local)
+
+Observabilidade clássica de API/performance local, complementar ao monitoramento de ML já existente (`online_metrics.jsonl`, Evidently e dashboards Streamlit).
+
+Escopo:
+- endpoint de métricas em `GET /metrics` (Prometheus format)
+- stack local via `docker-compose.observability.yml` com `api + prometheus + grafana`
+- provisioning automático de datasource e dashboard Grafana
+
+Arquivos:
+- `docker-compose.observability.yml`
+- `observability/prometheus/prometheus.yml`
+- `observability/grafana/provisioning/datasources/datasource.yml`
+- `observability/grafana/provisioning/dashboards/dashboard.yml`
+- `observability/grafana/dashboards/api_observability.json`
+
+Subir stack:
+
+```bash
+docker compose -f docker-compose.observability.yml up --build
+```
+
+URLs:
+- API: `http://localhost:8000`
+- Metrics: `http://localhost:8000/metrics`
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3000`
+
+Validação recomendada:
+
+```bash
+# testes leves (pytest)
+.venv/bin/pytest tests/test_metrics_endpoint.py tests/test_observability_contracts.py
+
+# smoke local end-to-end (docker compose + probes API/Prometheus/Grafana)
+bash scripts/smoke_observability.sh
+
+# opcional: nao rebuildar imagem no smoke (exige imagem local ja criada)
+NO_BUILD=1 bash scripts/smoke_observability.sh
+
+# opcional: sobrescrever portas locais para evitar conflito
+API_PORT=8010 PROMETHEUS_PORT=9099 GRAFANA_PORT=3300 bash scripts/smoke_observability.sh
+```
+
+Workflow manual opcional no GitHub Actions:
+- `.github/workflows/observability-smoke.yml` (`workflow_dispatch`)
+- executa `scripts/smoke_observability.sh`, coleta logs e derruba a stack ao final.
+
+Métricas principais expostas:
+- `http_requests_total{method,path,status}`
+- `http_request_duration_seconds{method,path}` (histograma)
+- `inference_records_total{endpoint="/predict"}`
+- `inference_positive_total{endpoint="/predict",threshold}`
+- `model_loaded` e `metadata_loaded` (gauges)
+
+Notas operacionais:
+- os painéis Grafana filtram `path="/metrics"` para evitar distorção de latência/erro por scrape.
+- labels de `path` usam template de rota (`/predict`, `/health`, etc.); caminhos sem rota resolvida caem em `"/__unmatched__"` para controlar cardinalidade.
+- sem PII: não há `RA`, payloads, IDs de alunos ou scores individuais nas métricas.
+- `/metrics` não substitui monitoramento de drift/ground-truth delay; é complementar.
+
 ### CI (GitHub Actions) (Fase 7)
 
 - Workflow em `.github/workflows/ci.yml`
@@ -2969,6 +3032,8 @@ Nota de shift temporal:
 - [x] Publicar dashboard operacional consolidando inferência, drift e métricas pós-fato
 - [x] Adicionar testes de carga básicos para API de inferência
 - [x] Preparar pacote de evidências para banca (runbook + artefatos + checklist de auditoria) *(pacote local em `artifacts/evidence_pack/`; screenshots visuais ficam em `SCREENSHOTS_PENDENTES.md`)*
+- [x] Implementar observabilidade mínima local com Prometheus + Grafana (`/metrics`, compose e provisioning) *(DOING -> DONE)*
+- [x] Adicionar testes de observabilidade (pytest + contratos + smoke manual) *(DOING -> DONE)*
 
 </details>
 

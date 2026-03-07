@@ -11,6 +11,11 @@ import numpy as np
 from fastapi import APIRouter, Body, HTTPException
 
 import app.deps as deps
+from app.metrics import (
+    build_metrics_response,
+    observe_inference_batch,
+    set_model_metadata_gauges,
+)
 from app.predict_utils import (
     build_raw_dataframe,
     build_model_input_frame,
@@ -228,6 +233,16 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@router.get("/metrics", include_in_schema=False)
+def metrics():
+    status = deps.get_model_loader_status()
+    set_model_metadata_gauges(
+        model_loaded=bool(status.get("model_loaded", False)),
+        metadata_loaded=bool(status.get("metadata_loaded", False)),
+    )
+    return build_metrics_response()
+
+
 @router.get("/version")
 def version() -> dict[str, object]:
     context = deps.get_prediction_context()
@@ -248,6 +263,10 @@ def version() -> dict[str, object]:
         "model_notes": list(status.get("notes", [])),
         "notes": _dedupe_notes(notes),
     }
+    set_model_metadata_gauges(
+        model_loaded=bool(payload["model_loaded"]),
+        metadata_loaded=bool(payload["metadata_loaded"]),
+    )
     log_event(
         _logger,
         "version_info",
@@ -278,6 +297,7 @@ def predict(payload: PredictRequest = Body(...)) -> PredictResponse:
     variant_for_online = "unknown"
     threshold_for_online: float | None = None
     positive_rate_for_log: float | None = None
+    positive_count_for_metrics = 0
 
     try:
         try:
@@ -303,6 +323,10 @@ def predict(payload: PredictRequest = Body(...)) -> PredictResponse:
 
         expected_raw_cols = list(context.get("expected_raw_cols", []))
         metadata_loaded = bool(context.get("metadata_loaded", False))
+        set_model_metadata_gauges(
+            model_loaded=bool(model_state.get("model_loaded", False)),
+            metadata_loaded=metadata_loaded,
+        )
         identity_context = dict(context.get("identity", {}))
         model_version_for_online = str(identity_context.get("model_version", "unknown"))
         model_family_for_online = str(identity_context.get("model_family", "unknown"))
@@ -390,6 +414,9 @@ def predict(payload: PredictRequest = Body(...)) -> PredictResponse:
 
         threshold = float(context["threshold"])
         threshold_for_online = float(threshold)
+        positive_count_for_metrics = sum(
+            1 for score in risk_probas_for_online if float(score) >= threshold_for_online
+        )
         positive_rate_for_log = _compute_positive_rate(risk_probas_for_online, threshold_for_online)
         identity = dict(context.get("identity", {}))
         model_version_for_online = str(identity.get("model_version", "unknown"))
@@ -463,6 +490,13 @@ def predict(payload: PredictRequest = Body(...)) -> PredictResponse:
             variant=variant_for_online,
             reason_code=reason_code_for_online,
         )
+        if int(status_code_for_log) == 200:
+            observe_inference_batch(
+                endpoint="/predict",
+                n_records=int(count_records),
+                n_positives=int(positive_count_for_metrics),
+                threshold=threshold_for_online,
+            )
 
 
 __all__ = ["router"]
